@@ -477,6 +477,19 @@ class CalvinAdapter:
         if not 0 <= int(task_id) < len(self._sequences):
             raise IndexError(f"CALVIN task_id out of range: {task_id}")
 
+    # Cameras this adapter actually publishes (to_images maps exactly these).
+    # The official evaluator never builds the full camera set: it constructs the
+    # env through CalvinEnvWrapper, which forwards the checkpoint observation
+    # space so that unused cameras (notably the tactile sensor) are removed from
+    # the merged config before instantiation.  Mirroring that here keeps env
+    # construction in the same scope as upstream and avoids importing the
+    # tactile renderer's separate dependency chain.  It changes no rendered
+    # pixel, no reset state and no TaskOracle input.
+    CAMERA_OBS_SPACE: dict[str, list[str]] = {
+        "rgb_obs": ["rgb_static", "rgb_gripper"],
+        "depth_obs": [],
+    }
+
     def _ensure_env(self) -> Any:
         if self._env is None:
             if self._env_factory is not None:
@@ -489,7 +502,11 @@ class CalvinAdapter:
                     np.float = float  # type: ignore[attr-defined]
                 from calvin_env.envs.play_table_env import get_env
 
-                self._env = get_env(self.validation_path, show_gui=False)
+                self._env = get_env(
+                    self.validation_path,
+                    obs_space=self.CAMERA_OBS_SPACE,
+                    show_gui=False,
+                )
         return self._env
 
     def reset_episode(self, task_id: int, init_state_id: int, run_index: int, episode_seed: int) -> dict[str, Any]:

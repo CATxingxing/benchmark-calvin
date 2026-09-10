@@ -18,7 +18,12 @@ results/
 *.log
 evidence/
 preflight_evidence/
+out/
 config.yaml
+config.policy_smoke.yaml
+config.smoke.yaml
 dataflow.yaml
 dataflow.stub.yaml
+dataflow.policy.yaml
+dataflow.policy_smoke.yaml
 

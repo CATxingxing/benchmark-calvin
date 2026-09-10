@@ -100,8 +100,10 @@ def test_config_freezes_official_run_shape_and_language(tmp_path):
     base = {
         "dataset_path": str(tmp_path),
         "protocol": "lh_mtlc",
+        "suite": "lh_mtlc",
         "action_mode": "absolute_euler",
         "sequence_count": 1000,
+        "policy_id": "calvin_policy",
     }
     path = tmp_path / "config.yaml"
 
@@ -115,6 +117,16 @@ def test_config_freezes_official_run_shape_and_language(tmp_path):
 
     path.write_text(yaml.safe_dump({**base, "suite": "mtlc"}), encoding="utf-8")
     with pytest.raises(ValueError, match="suite must match protocol"):
+        load_config(path)
+
+    # The reviewed contract requires an explicit suite; it must not default
+    # silently to the protocol, otherwise a typo in the protocol would go
+    # unnoticed and the result file's suite label could diverge.
+    path.write_text(
+        yaml.safe_dump({key: value for key, value in base.items() if key != "suite"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="suite is required"):
         load_config(path)
 
     path.write_text(yaml.safe_dump(base), encoding="utf-8")
