@@ -1,0 +1,15 @@
+benchmark: calvin
+suite: lh_mtlc
+protocol: lh_mtlc
+dataset_path: ../calvin/dataset/calvin_debug_dataset
+action_mode: absolute_euler
+sequence_count: 1000
+policy_id: calvin_policy
+# Small implementation smoke: load/validate the official 1000-sequence set,
+# but only roll out the selected Forge episode(s). Remove task_ids for full LH-MTLC.
+task_ids: [0]
+init_state_ids: [0]
+num_runs: 1
+seed: 0
+send_instruction: true
+result_dir: results/benchmark

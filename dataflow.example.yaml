@@ -1,0 +1,32 @@
+# Minimal CALVIN ↔ Policy Dora graph.  Replace executable paths and choose a
+# policy config; the adapter contract itself is policy-independent.
+nodes:
+  - id: calvin_benchmark
+    path: ./.venv/bin/python
+    args: -u main.py
+    env:
+      BENCHMARK_CONFIG: ./config.yaml
+      CALVIN_ROOT: ../calvin
+    inputs:
+      action: policy/action
+    outputs:
+      - proprio_state
+      - image/main
+      - image/second
+      - policy_command
+      - benchmark_status
+      - benchmark_result
+
+  - id: policy
+    path: <POLICY_RUNTIME>
+    args: <POLICY_ARGS>
+    inputs:
+      tick: dora/timer/millis/20
+      policy_command:
+        source: calvin_benchmark/policy_command
+        queue_size: 32
+      proprio_state: calvin_benchmark/proprio_state
+      image/main: calvin_benchmark/image/main
+      image/second: calvin_benchmark/image/second
+    outputs:
+      - action

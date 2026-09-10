@@ -1,0 +1,24 @@
+.venv/
+.python/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+results/
+
+# large / runtime / acceptance artifacts — never commit
+*.ckpt
+*.npy
+*.npz
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+*.jsonl
+*.log
+evidence/
+preflight_evidence/
+config.yaml
+dataflow.yaml
+dataflow.stub.yaml
+
