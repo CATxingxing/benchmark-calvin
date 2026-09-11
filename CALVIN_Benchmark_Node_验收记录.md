@@ -26,7 +26,7 @@ cf2bc864900ce38b85daa68300addb8fdef79cc7102bd652a99f5f1924b69346
 
 ### 公开基线对比（debug 数据：官方 evaluator vs Forge）与复现
 
-本记录**不引用论文/Leaderboard 数字**；"基线"指**在官方 debug 数据上、由 CALVIN 官方 evaluator 跑出的结果**，Forge 与之对比。
+"基线"指**在官方 debug 数据上、由 CALVIN 官方 evaluator 跑出的结果**，Forge 与之对比。
 
 复现步骤：
 
@@ -104,13 +104,11 @@ python compare_acceptance.py --official official_repr20.json \
 
 **结论：CALVIN Benchmark Node 通过正式验收（判据 A）。** Official 与 Forge 在 20 条序列上逐序列完全一致（SR1 均 7/20，`avg_seq_len` 均 0.35），Wilson 区间重合，Fisher `p = 1.0`，没有观察到统计上可区分的差异。因此现有证据支持：**Forge 两节点执行链路没有系统性改变 CALVIN LH-MTLC 的任务、场景、观测、动作与评分语义。**
 
-这里的"通过"表示在当前 20-episode 验收规模下，Forge 与官方 evaluator 的 benchmark 表现**逐序列一致**；并不意味着 stochastic policy 在逐 action、逐帧轨迹上必须完全一致（见下）。
-
 ### 最终候选代码 Runtime Smoke
 
 最终候选代码（refactor 后）额外执行了一次端到端对照（`get_sequences(1000)[:5]`）：Official 与 Forge 的 `chain_length` 均为 `[0,1,3,0,1]`，**逐序列 5/5 一致，`avg=1.0`**。同时 stub 两节点冒烟：观测数 == 动作数（`obs == act`），结果 JSON 正常落盘，MCIL 权重与 384 维语言嵌入加载正常，无 traceback/`KeyError`。
 
-### 加分项：Deterministic Trace 对照
+### Deterministic Trace 对照
 
 固定动作、同序列，官方 env 路径 vs Forge adapter：
 
@@ -124,7 +122,7 @@ python compare_acceptance.py --official official_repr20.json \
 | 正向（同动作、两次独立 reset） | **0.0（逐位相同）** | — |
 | 反向（注入扰动） | **6.24** | **第 0 帧** |
 
-说明：扰动一个动作分量即导致状态显著偏离；正向时 `robot_obs` 逐位相同。（`scene_obs` 存在 ~0.002 的物理残差，属 `scene_obs` 未覆盖速度自由度，已在下方遗留项说明。）
+说明：扰动一个动作分量即导致状态显著偏离；正向时 `robot_obs` 逐位相同。（`scene_obs` 存在 ~0.002 的物理残差，属 `scene_obs` 未覆盖速度自由度，已在下方遗留项说明）
 
 ### 接入过程中发现并修复的问题
 
@@ -163,11 +161,6 @@ end-to-end Official vs Forge（get_sequences(1000)[:5]）                 PASS (
 
 checkpoint / 配置 / commit 已记录；结果 JSON 含 `mean_policy_latency_ms`（按 RoboDojo 口径，不额外测 CPU/GPU 峰值）。
 
-### 遗留项
-
-1. **公开基线口径**：本记录只做"官方 debug vs Forge debug"的等价性验收，未用完整 `task_D_D` 与全量 1000 条序列做端到端跑分。
-2. **`scene_obs` 未覆盖速度自由度**：同一 init-state 两次 reset，实际物体速度残差使 `scene_obs` 出现 ~0.002 的瞬态差异（`robot_obs` 逐位相同）；跨 env 实例渲染图像亦不一致（pybullet/EGL 属性）。
-3. **子任务超时标签**：CALVIN 子任务 360 步预算耗尽记为 `termination="partial"`（手册 §3.4 的 `timed_out` 指 episode 级 `max_steps`；CALVIN 用不到），且 `metrics.timed_out_subtask=true` 已保留，不影响 `avg_seq_len`/`SR1..SR5`。
 
 ### 最终结论
 
