@@ -17,6 +17,7 @@ results/
 *.jsonl
 *.log
 evidence/
+preflight/
 preflight_evidence/
 out/
 config.yaml
