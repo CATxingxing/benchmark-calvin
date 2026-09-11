@@ -22,3 +22,46 @@ Set `CALVIN_ROOT` to the pinned CALVIN checkout, point `dataset_path` at the CAL
 ## Reference-core boundary
 
 `_core/`, `bench_tool/`, and `result.py` are intended to remain byte-identical to the corresponding files in the reference `benchmark-libero` revision used for this integration. Benchmark-specific changes should stay in `adapters/`, `config.py`, examples, and minimal assembly code.
+
+## Observation contract and startup self-check
+
+The node renders CALVIN's native resolution and publishes it unchanged (scaling is the
+policy's job, manual §3.2):
+
+| dora channel | CALVIN camera | native resolution |
+| :--- | :--- | :--- |
+| `image/main` | `rgb_static` | 200 x 200 x 3 |
+| `image/second` | `rgb_gripper` | 84 x 84 x 3 |
+| `proprio_state` | `robot_obs` (native) | 15 floats (euler_obs=true) |
+
+At construction the adapter logs a one-time startup self-check
+(`[calvin_adapter] observation contract: ...`, manual §3.2 item 5 / §8) and repeats the
+same information under `reproducibility` in the result JSON. No flip/resize/normalize is
+applied at the benchmark layer.
+
+## Language embeddings (required for a meaningful score)
+
+CALVIN decides success with the environment TaskOracle; the policy conditions on
+precomputed MiniLM sentence embeddings stored in the dataset (`lang_annotations/embeddings.npy`).
+The released baselines use **`paraphrase-MiniLM-L6-v2`** (CALVIN's `conf/model/sbert.yaml`;
+before 2023 the config value `mini` resolved to the same model). Some dataset packages ship
+the **L3** variant in `lang_annotations`, which does not match the checkpoint and silently
+collapses the score. When preparing an evaluation dataset, ensure
+`lang_annotations/embeddings.npy` is the L6 embedding for the checkpoint; the acceptance
+harness used a repo-external copy with L6 embeddings.
+
+## Known deviations from benchmark-libero
+
+- `main.py` differs by a small amount (LIBERO-only `sys.path` handling removed, log tag and
+  `sys.exit` style); it is not modified further by this node.
+- Sub-task timeout is reported as `termination="partial"` with `metrics.timed_out_subtask=true`;
+  the shared `_core` only records `termination="timed_out"` for the episode-wide `max_steps`
+  backstop. The graded metrics (`avg_seq_len`, `SR1..SR5`) are unaffected.
+- CALVIN joint names / state semantics are derived in the adapter from the dataset
+  `merged_config.yaml` (`_resolve_state_names`) rather than declared as `config.py` constants.
+
+## Preflight probes (read-only)
+
+`preflight/probe_env.py` (reset determinism, frame dump), `preflight/probe_official_trace.py`
+(official env vs adapter fixed-action trace), `preflight/probe_oracle.py` (TaskOracle call
+path). They observe only and never edit CALVIN, the shared core or the adapter.

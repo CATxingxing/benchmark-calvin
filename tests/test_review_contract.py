@@ -262,6 +262,40 @@ def test_mtlc_aggregate_is_single_step_success_rate():
     }
 
 
+def test_close_swallows_env_close_error():
+    class _BadEnv:
+        def close(self):
+            raise RuntimeError("boom")
+
+    adapter = object.__new__(CalvinAdapter)
+    adapter._env = _BadEnv()
+    adapter.close()  # must not raise
+    assert adapter._env is None
+
+
+def test_reproducibility_includes_native_cameras(tmp_path):
+    root = _dataset_root(tmp_path)
+    hydra = tmp_path / "validation" / ".hydra"
+    data = yaml.safe_load((hydra / "merged_config.yaml").read_text(encoding="utf-8"))
+    data["cameras"] = {
+        "static": {"width": 200, "height": 200},
+        "gripper": {"width": 84, "height": 84},
+    }
+    (hydra / "merged_config.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    adapter = CalvinAdapter(
+        _lh_cfg(root),
+        env=_Env(dim=15),
+        sequences=[({}, ["a"] * 5)],
+        oracle=_NeverOracle(),
+        annotations={"a": ["do a"]},
+    )
+    assert adapter.reproducibility()["native_cameras"] == {
+        "image/main": [200, 200],
+        "image/second": [84, 84],
+    }
+
+
 def test_example_dataflow_keeps_policy_command_queue_32():
     data = yaml.safe_load((ROOT / "dataflow.example.yaml").read_text(encoding="utf-8"))
     benchmark, policy = data["nodes"]

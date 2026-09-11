@@ -277,6 +277,8 @@ class CalvinAdapter:
         if self._oracle is None:
             self._oracle = self._load_task_oracle()
         self._state_names = self._resolve_state_names()
+        self._native_cameras = self._resolve_native_cameras()
+        self._log_observation_contract()
 
     # ------------------------------------------------------------------
     # Official CALVIN sources
@@ -356,6 +358,42 @@ class CalvinAdapter:
             *[f"robot_joint_{joint_id}" for joint_id in arm_joint_ids],
             "gripper_action",
         ]
+
+    def _resolve_native_cameras(self) -> dict[str, list[int]]:
+        # Native render resolution this node publishes, keyed by dora channel.
+        # Scaling is the policy's job (manual §3.2); logging it at startup makes
+        # a mis-set resolution visible instead of silently dropping the score.
+        merged = self.validation_path / ".hydra" / "merged_config.yaml"
+        if not merged.is_file():
+            return {}
+        import yaml
+
+        data = yaml.safe_load(merged.read_text(encoding="utf-8")) or {}
+        cameras = data.get("cameras")
+        if not isinstance(cameras, dict):
+            return {}
+        result: dict[str, list[int]] = {}
+        for key, alias in (("static", "image/main"), ("gripper", "image/second")):
+            cam = cameras.get(key)
+            if (
+                isinstance(cam, dict)
+                and isinstance(cam.get("width"), int)
+                and isinstance(cam.get("height"), int)
+            ):
+                result[alias] = [int(cam["width"]), int(cam["height"])]
+        return result
+
+    def _log_observation_contract(self) -> None:
+        # Startup self-check (manual §3.2 item 5 / §8): resolution layering,
+        # camera aliases and proprio/observation semantics.  This node logs what
+        # it renders and publishes; the target checkpoint's expected input size
+        # is logged by the policy node.
+        print(
+            f"[calvin_adapter] observation contract: protocol={self.cfg.protocol} "
+            f"action_mode={self.codec.mode} native_cameras={self._native_cameras} "
+            "observation_semantics=CALVIN native HWC RGB, no flip/resize/normalize",
+            flush=True,
+        )
 
     # ------------------------------------------------------------------
     # MTLC official dataset-index mapping
@@ -463,6 +501,7 @@ class CalvinAdapter:
             "protocol": self.cfg.protocol,
             "action_mode": self.codec.mode,
             "max_actions_per_subtask": 360 if self.cfg.protocol == "lh_mtlc" else 240,
+            "native_cameras": getattr(self, "_native_cameras", {}),
             "observation_semantics": "CALVIN native HWC RGB; no flip/resize/normalize; integer 0..255 carrier -> uint8",
         }
         if self.cfg.protocol == "lh_mtlc":
@@ -680,7 +719,10 @@ class CalvinAdapter:
         if self._env is not None:
             close = getattr(self._env, "close", None)
             if callable(close):
-                close()
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 关闭失败不该影响批次收尾与落盘
+                    pass
         self._env = None
         self._obs = None
         self._protocol = None
