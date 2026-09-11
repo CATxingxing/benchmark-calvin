@@ -1,8 +1,14 @@
 """CALVIN -> Forge adapter.
 
 Only CALVIN-native reset, observation, action and TaskOracle semantics live in
-this module. Policy preprocessing/chunking/recurrent state remains entirely in
+this module.  Policy preprocessing/chunking/recurrent state remains entirely in
 the unmodified Forge Policy runtime.
+
+Layout (single file, ordered by responsibility):
+    1. runtime bootstrap + compatibility shims
+    2. action codec + official protocol state machines (LH-MTLC / MTLC)
+    3. official dataset-index helpers
+    4. ``CalvinAdapter`` (the ``_core`` BenchmarkAdapter implementation)
 """
 
 from __future__ import annotations
@@ -18,6 +24,21 @@ from typing import Any, Callable
 import numpy as np
 
 from _core.adapter import StepOutcome
+
+# ---------------------------------------------------------------------------
+# Constants fixed by the CALVIN official evaluation protocol.
+# ---------------------------------------------------------------------------
+
+LH_MAX_ACTIONS = 360  # official ``evaluate_policy.EP_LEN`` per subtask
+MTLC_MAX_ACTIONS = 240  # official ``evaluate_policy_singlestep`` ep_len
+OBSERVATION_SEMANTICS = (
+    "CALVIN native HWC RGB; no flip/resize/normalize; integer 0..255 carrier -> uint8"
+)
+
+
+# ===========================================================================
+# 1. Runtime bootstrap + compatibility shims
+# ===========================================================================
 
 
 def _configure_calvin_import_paths() -> None:
@@ -36,7 +57,22 @@ def _configure_calvin_import_paths() -> None:
             sys.path.insert(0, str(path))
 
 
+def _apply_numpy_compat() -> None:
+    """Process-local alias for bundled tacto 0.0.3 on modern NumPy.
+
+    tacto references the removed ``np.float``; aliasing it here leaves the
+    CALVIN checkout untouched and changes no observation data.
+    """
+    if not hasattr(np, "float"):
+        np.float = float  # type: ignore[attr-defined]
+
+
 _configure_calvin_import_paths()
+
+
+# ===========================================================================
+# 2. Action codec + official protocol state machines
+# ===========================================================================
 
 
 @dataclass(frozen=True)
@@ -91,12 +127,12 @@ class LhMtlcProtocol:
 
     The adapter owns the environment and calls this object after each native
     step.  A sequence has one reset, a fresh ``start_info`` for every subtask,
-    and a hard 360-action budget per subtask.
+    and a hard ``max_actions`` budget per subtask (official 360).
     """
 
     sequence: tuple[str, ...]
     language: Callable[[str], str]
-    max_actions: int = 360
+    max_actions: int = LH_MAX_ACTIONS
     index: int = 0
     actions: int = 0
     completed: int = 0
@@ -176,12 +212,20 @@ def _dataset_index(value: Any) -> int:
     raise ValueError(f"MTLC dataset index must be integer-like, got {value!r}")
 
 
-@dataclass(frozen=True)
+@dataclass
 class MtlcProtocol:
-    """One-task 240-step protocol using checkpoint ``task_to_id_dict``."""
+    """One-task MTLC budget, mirroring :class:`LhMtlcProtocol` for one subtask.
+
+    Reset is once per trial, ``start_info`` is captured at reset, and the action
+    budget is the official 240.  ``task_to_id_dict`` comes from the checkpoint.
+    """
 
     task_to_id_dict: Mapping[str, Any]
-    max_actions: int = 240
+    max_actions: int = MTLC_MAX_ACTIONS
+    # per-episode state (reset by ``begin``)
+    task: str | None = None
+    start_info: dict[str, Any] | None = None
+    steps: int = 0
 
     def __post_init__(self) -> None:
         if not self.task_to_id_dict:
@@ -200,6 +244,33 @@ class MtlcProtocol:
             raise ValueError(f"checkpoint task_to_id_dict[{task!r}] contains a negative dataset id")
         return result
 
+    def begin(self, task: str, start_info: dict[str, Any]) -> None:
+        self.task = task
+        self.start_info = start_info
+        self.steps = 0
+
+    def observe(self, current_info: dict[str, Any], oracle: Any) -> dict[str, Any]:
+        if self.task is None or self.start_info is None:
+            raise RuntimeError("protocol.begin() must precede observe()")
+        solved = bool(oracle.get_task_info_for_set(self.start_info, current_info, {self.task}))
+        self.steps += 1
+        done = solved or self.steps >= self.max_actions
+        result: dict[str, Any] = {
+            "success": solved,
+            "done": done,
+            "steps": self.steps,
+            "chain_length": int(solved),
+            "subtasks": [self.task],
+        }
+        if not solved and done:
+            result["failed_subtask"] = self.task
+        return result
+
+
+# ===========================================================================
+# 3. Official dataset-index helpers
+# ===========================================================================
+
 
 def _episode_lookup_from_bounds(bounds: np.ndarray, min_window: int) -> np.ndarray:
     """Exact ``DiskDataset._build_file_indices`` mapping for validation data."""
@@ -215,9 +286,27 @@ def _episode_lookup_from_bounds(bounds: np.ndarray, min_window: int) -> np.ndarr
     return np.asarray(lookup, dtype=np.int64)
 
 
+# ===========================================================================
+# 4. CalvinAdapter (the _core BenchmarkAdapter implementation)
+# ===========================================================================
+
+
 class CalvinAdapter:
     SUCCESS_SOURCE = "calvin_env.envs.tasks.Tasks.get_task_info_for_set"
     RECORD_FPS = 30.0
+
+    # Cameras this adapter actually publishes (to_images maps exactly these).
+    # The official evaluator never builds the full camera set: it constructs the
+    # env through CalvinEnvWrapper, which forwards the checkpoint observation
+    # space so that unused cameras (notably the tactile sensor) are removed from
+    # the merged config before instantiation.  Mirroring that here keeps env
+    # construction in the same scope as upstream and avoids importing the
+    # tactile renderer's separate dependency chain.  It changes no rendered
+    # pixel, no reset state and no TaskOracle input.
+    CAMERA_OBS_SPACE: dict[str, list[str]] = {
+        "rgb_obs": ["rgb_static", "rgb_gripper"],
+        "depth_obs": [],
+    }
 
     def __init__(
         self,
@@ -242,7 +331,6 @@ class CalvinAdapter:
         self._annotations = dict(annotations or {})
         self._protocol: LhMtlcProtocol | None = None
         self._mtlc_protocol: MtlcProtocol | None = None
-        self._mtlc_start_info: dict[str, Any] | None = None
         self._task_id: int | None = None
         self._obs: dict[str, Any] | None = None
         self._episode_metrics: dict[str, Any] = {}
@@ -280,8 +368,7 @@ class CalvinAdapter:
         self._native_cameras = self._resolve_native_cameras()
         self._log_observation_contract()
 
-    # ------------------------------------------------------------------
-    # Official CALVIN sources
+    # ---- official CALVIN sources ------------------------------------------
 
     @staticmethod
     def _calvin_conf_root() -> Path:
@@ -325,16 +412,21 @@ class CalvinAdapter:
         # Official evaluator uses val_annotations[subtask][0].
         return str(value[0])
 
-    def _resolve_state_names(self) -> list[str]:
-        # Raw robot_obs is generated by calvin_env.robot.Robot.  Its labels are
-        # determined by robot.euler_obs and robot.arm_joint_ids in the dataset's
-        # exact merged simulation config; do not guess them from a checkpoint.
+    # ---- observation contract (state names, cameras, startup self-check) --
+
+    def _merged_config(self) -> dict[str, Any]:
         merged = self.validation_path / ".hydra" / "merged_config.yaml"
         if not merged.is_file():
             raise FileNotFoundError(f"CALVIN validation merged_config.yaml not found: {merged}")
         import yaml
 
-        data = yaml.safe_load(merged.read_text(encoding="utf-8")) or {}
+        return yaml.safe_load(merged.read_text(encoding="utf-8")) or {}
+
+    def _resolve_state_names(self) -> list[str]:
+        # Raw robot_obs is generated by calvin_env.robot.Robot.  Its labels are
+        # determined by robot.euler_obs and robot.arm_joint_ids in the dataset's
+        # exact merged simulation config; do not guess them from a checkpoint.
+        data = self._merged_config()
         try:
             robot = data["robot"]
             euler = robot["euler_obs"]
@@ -363,12 +455,10 @@ class CalvinAdapter:
         # Native render resolution this node publishes, keyed by dora channel.
         # Scaling is the policy's job (manual §3.2); logging it at startup makes
         # a mis-set resolution visible instead of silently dropping the score.
-        merged = self.validation_path / ".hydra" / "merged_config.yaml"
-        if not merged.is_file():
+        try:
+            data = self._merged_config()
+        except FileNotFoundError:
             return {}
-        import yaml
-
-        data = yaml.safe_load(merged.read_text(encoding="utf-8")) or {}
         cameras = data.get("cameras")
         if not isinstance(cameras, dict):
             return {}
@@ -383,20 +473,30 @@ class CalvinAdapter:
                 result[alias] = [int(cam["width"]), int(cam["height"])]
         return result
 
+    def _observation_contract(self) -> dict[str, Any]:
+        """Single source of truth for the published observation contract."""
+        return {
+            "protocol": self.cfg.protocol,
+            "action_mode": self.codec.mode,
+            "native_cameras": getattr(self, "_native_cameras", {}),
+            "observation_semantics": OBSERVATION_SEMANTICS,
+        }
+
     def _log_observation_contract(self) -> None:
         # Startup self-check (manual §3.2 item 5 / §8): resolution layering,
         # camera aliases and proprio/observation semantics.  This node logs what
         # it renders and publishes; the target checkpoint's expected input size
         # is logged by the policy node.
+        contract = self._observation_contract()
         print(
-            f"[calvin_adapter] observation contract: protocol={self.cfg.protocol} "
-            f"action_mode={self.codec.mode} native_cameras={self._native_cameras} "
-            "observation_semantics=CALVIN native HWC RGB, no flip/resize/normalize",
+            "[calvin_adapter] observation contract: "
+            f"protocol={contract['protocol']} action_mode={contract['action_mode']} "
+            f"native_cameras={contract['native_cameras']} "
+            f"observation_semantics={contract['observation_semantics']}",
             flush=True,
         )
 
-    # ------------------------------------------------------------------
-    # MTLC official dataset-index mapping
+    # ---- MTLC official dataset-index mapping ------------------------------
 
     def _load_task_to_id_dict(self) -> Mapping[str, Any]:
         checkpoint_path = getattr(self.cfg, "checkpoint_path", None)
@@ -463,8 +563,7 @@ class CalvinAdapter:
             raise FileNotFoundError(f"CALVIN validation frame for dataset id {dataset_id} not found: {path}")
         return path
 
-    # ------------------------------------------------------------------
-    # BenchmarkAdapter contract
+    # ---- BenchmarkAdapter contract ----------------------------------------
 
     @property
     def num_tasks(self) -> int:
@@ -495,14 +594,15 @@ class CalvinAdapter:
         return list(self._state_names)
 
     def reproducibility(self) -> dict[str, Any]:
+        contract = self._observation_contract()
         value = {
             "dataset_root": str(self.dataset_root),
             "validation_path": str(self.validation_path),
-            "protocol": self.cfg.protocol,
-            "action_mode": self.codec.mode,
-            "max_actions_per_subtask": 360 if self.cfg.protocol == "lh_mtlc" else 240,
-            "native_cameras": getattr(self, "_native_cameras", {}),
-            "observation_semantics": "CALVIN native HWC RGB; no flip/resize/normalize; integer 0..255 carrier -> uint8",
+            "protocol": contract["protocol"],
+            "action_mode": contract["action_mode"],
+            "max_actions_per_subtask": LH_MAX_ACTIONS if self.cfg.protocol == "lh_mtlc" else MTLC_MAX_ACTIONS,
+            "native_cameras": contract["native_cameras"],
+            "observation_semantics": contract["observation_semantics"],
         }
         if self.cfg.protocol == "lh_mtlc":
             value["sequence_count"] = len(self._sequences)
@@ -516,29 +616,12 @@ class CalvinAdapter:
         if not 0 <= int(task_id) < len(self._sequences):
             raise IndexError(f"CALVIN task_id out of range: {task_id}")
 
-    # Cameras this adapter actually publishes (to_images maps exactly these).
-    # The official evaluator never builds the full camera set: it constructs the
-    # env through CalvinEnvWrapper, which forwards the checkpoint observation
-    # space so that unused cameras (notably the tactile sensor) are removed from
-    # the merged config before instantiation.  Mirroring that here keeps env
-    # construction in the same scope as upstream and avoids importing the
-    # tactile renderer's separate dependency chain.  It changes no rendered
-    # pixel, no reset state and no TaskOracle input.
-    CAMERA_OBS_SPACE: dict[str, list[str]] = {
-        "rgb_obs": ["rgb_static", "rgb_gripper"],
-        "depth_obs": [],
-    }
-
     def _ensure_env(self) -> Any:
         if self._env is None:
             if self._env_factory is not None:
                 self._env = self._env_factory(self.validation_path)
             else:
-                # CALVIN's bundled tacto 0.0.3 references removed np.float on
-                # modern NumPy.  This process-local compatibility alias leaves
-                # the CALVIN checkout untouched and changes no observation data.
-                if not hasattr(np, "float"):
-                    np.float = float  # type: ignore[attr-defined]
+                _apply_numpy_compat()
                 from calvin_env.envs.play_table_env import get_env
 
                 self._env = get_env(
@@ -575,15 +658,13 @@ class CalvinAdapter:
         self._episode_metrics = {"sequence_length": len(sequence), "chain_length": 0, "subtasks": list(sequence)}
 
         if self.cfg.protocol == "lh_mtlc":
-            self._protocol = LhMtlcProtocol(tuple(sequence), self._language, max_actions=360)
+            self._protocol = LhMtlcProtocol(tuple(sequence), self._language, max_actions=LH_MAX_ACTIONS)
             self._protocol.begin(start_info)
-            self._mtlc_protocol = None
-            self._mtlc_start_info = None
         else:
             self._protocol = None
             if self._mtlc_protocol is None:
                 raise RuntimeError("MTLC protocol is not initialized")
-            self._mtlc_start_info = start_info
+            self._mtlc_protocol.begin(str(self._mtlc_trials[task_id][0]), start_info)
             self._episode_metrics["steps"] = 0
             self._episode_metrics["dataset_id"] = self._mtlc_trials[task_id][1]
         return self._obs
@@ -595,37 +676,44 @@ class CalvinAdapter:
         encoded = self.codec.encode(action)
         obs, reward, _env_done, _info = env.step(encoded)
         self._obs = obs
-
         if self.cfg.protocol == "lh_mtlc":
-            if self._protocol is None:
-                raise RuntimeError("LH-MTLC protocol is not initialized")
-            # Official evaluator ignores env reward/done and checks TaskOracle
-            # after every executed action, including action 360.
-            result = self._protocol.observe(env.get_info(), self._oracle)
-            self._episode_metrics.update(result)
-            return StepOutcome(
-                obs=obs,
-                reward=float(reward),
-                done=bool(result["done"]),
-                success=bool(result["success"]),
-                metrics=dict(self._episode_metrics),
-                next_instruction=result.get("next_instruction"),
-            )
+            return self._lh_step(obs, reward, env)
+        return self._mtlc_step(obs, reward, env)
 
-        if self._mtlc_protocol is None or self._mtlc_start_info is None:
-            raise RuntimeError("MTLC protocol/start_info is not initialized")
-        task = self._mtlc_trials[self._task_id][0]
-        solved = bool(self._oracle.get_task_info_for_set(self._mtlc_start_info, env.get_info(), {task}))
-        steps = int(self._episode_metrics.get("steps", 0)) + 1
-        done = solved or steps >= self._mtlc_protocol.max_actions
-        self._episode_metrics.update({"steps": steps, "chain_length": int(solved), "subtasks": [task]})
-        if not solved and done:
-            self._episode_metrics["failed_subtask"] = task
+    def _lh_step(self, obs: dict[str, Any], reward: float, env: Any) -> StepOutcome:
+        if self._protocol is None:
+            raise RuntimeError("LH-MTLC protocol is not initialized")
+        # Official evaluator ignores env reward/done and checks TaskOracle
+        # after every executed action, including action 360.
+        result = self._protocol.observe(env.get_info(), self._oracle)
+        self._episode_metrics.update(result)
         return StepOutcome(
             obs=obs,
             reward=float(reward),
-            done=done,
-            success=solved,
+            done=bool(result["done"]),
+            success=bool(result["success"]),
+            metrics=dict(self._episode_metrics),
+            next_instruction=result.get("next_instruction"),
+        )
+
+    def _mtlc_step(self, obs: dict[str, Any], reward: float, env: Any) -> StepOutcome:
+        if self._mtlc_protocol is None:
+            raise RuntimeError("MTLC protocol is not initialized")
+        result = self._mtlc_protocol.observe(env.get_info(), self._oracle)
+        self._episode_metrics.update(
+            {
+                "steps": result["steps"],
+                "chain_length": result["chain_length"],
+                "subtasks": result["subtasks"],
+            }
+        )
+        if result.get("failed_subtask"):
+            self._episode_metrics["failed_subtask"] = result["failed_subtask"]
+        return StepOutcome(
+            obs=obs,
+            reward=float(reward),
+            done=bool(result["done"]),
+            success=bool(result["success"]),
             metrics=dict(self._episode_metrics),
         )
 
@@ -727,4 +815,3 @@ class CalvinAdapter:
         self._obs = None
         self._protocol = None
         self._mtlc_protocol = None
-        self._mtlc_start_info = None

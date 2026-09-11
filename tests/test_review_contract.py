@@ -177,13 +177,38 @@ def test_mtlc_adapter_ignores_environment_done_before_240():
     adapter._task_id = 0
     adapter._mtlc_trials = [("a", 0)]
     adapter._mtlc_protocol = MtlcProtocol({"a": [0]})
-    adapter._mtlc_start_info = {"robot_info": {}, "scene_info": {}}
+    adapter._mtlc_protocol.begin("a", {"robot_info": {}, "scene_info": {}})
     adapter._oracle = _NeverOracle()
     adapter._episode_metrics = {"steps": 0, "chain_length": 0, "subtasks": ["a"]}
     outcome = adapter.step(np.zeros(7))
     assert outcome.success is False
     assert outcome.done is False
     assert outcome.metrics["steps"] == 1
+
+
+def test_mtlc_protocol_observe_success_and_timeout():
+    class _Oracle:
+        def __init__(self, solve):
+            self.solve = solve
+            self.calls = 0
+
+        def get_task_info_for_set(self, *_args):
+            self.calls += 1
+            return {"ok"} if self.solve else set()
+
+    solved = MtlcProtocol({"a": [0]})
+    solved.begin("a", {"robot_info": {}, "scene_info": {}})
+    r = solved.observe({}, _Oracle(True))
+    assert r == {"success": True, "done": True, "steps": 1, "chain_length": 1, "subtasks": ["a"]}
+
+    timed = MtlcProtocol({"a": [0]})
+    timed.begin("a", {"robot_info": {}, "scene_info": {}})
+    oracle = _Oracle(False)
+    result = None
+    for _ in range(240):
+        result = timed.observe({}, oracle)
+    assert result["done"] is True and result["success"] is False
+    assert result["steps"] == 240 and result["failed_subtask"] == "a"
 
 
 def test_mtlc_dataset_index_mapping_matches_disk_dataset_algorithm():
