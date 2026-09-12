@@ -104,6 +104,32 @@ python compare_acceptance.py --official official_repr20.json \
 
 **结论：CALVIN Benchmark Node 通过正式验收（判据 A）。** Official 与 Forge 在 20 条序列上逐序列完全一致（SR1 均 7/20，`avg_seq_len` 均 0.35），Wilson 区间重合，Fisher `p = 1.0`，没有观察到统计上可区分的差异。因此现有证据支持：**Forge 两节点执行链路没有系统性改变 CALVIN LH-MTLC 的任务、场景、观测、动作与评分语义。**
 
+### 外部审查问题回应（精简）
+
+| 审查问题 | 结论 | 依据 |
+| :--- | :--- | :--- |
+| P1-1 N=20 统计功效不足 | 已由 N=50 回应 | 已有 official/Forge 各 50：逐序列 **50/50** 一致、Fisher p=1.0（`evidence/acceptance_comparison_L6.json`）。逐序列一致强于统计非劣。 |
+| P1-2 复现材料不入库 | 不处理（合理） | harness 为 validation-only、非交付物；记录含完整复现步骤，手册未要求其入库。 |
+| P1-3 三态终止偏离 | **已修复** | 子任务预算耗尽现记 `timed_out`（见下节）；`chain_length`/`num_steps` 不变。 |
+| P1-4 policy 侧 RNG 前置 | 非接入错误，仅记前置 | benchmark 节点逐位确定；随机性属 MCIL。验证策略已按官方 `seed_everything(0)`（模型加载后、首次 step 前）。 |
+| P2-4 policy 侧门控前置 | 非 benchmark 缺陷 | dora 跨通道乱序是框架性质，手册 §3.1 已列已知、watchdog 为待办；修复需动共享 `_core`（硬约束禁止）。前置条件已写入 README 与 `dataflow.example.yaml`。 |
+| P2-5 MTLC 无端到端 | **已补做** | 见「MTLC 端到端验收」：22/22 逐 trial 一致 + 全量映射算法等价。 |
+| P2-6 靶子/全量 | 不处理（合理） | 全量 task_D_D 177GB 不可得；leaderboard 数字基于全量验证集，与 debug 20/50 不可比。 |
+| P2-7 文档矛盾 | 已修正+说明 | `robot_obs` 逐位相同、`scene_obs` 存在 ~0.002 物理残差（未覆盖速度自由度）；图像不逐位属渲染器固有（两个独立官方 env 同样不一致）；不测 CPU/GPU 峰值不影响正确性。 |
+
+### 三态终止修复与修复前后等价（判据 A 未被破坏）
+
+- **修复**：`adapters/calvin_adapter.py` 在 `_lh_step`/`_mtlc_step` 每步把 `cfg.max_steps` 设为当前子任务截止步（累计步数 + 剩余预算），并在预算耗尽时把 `StepOutcome.done` 由 True 改为 False，使冻结 `_core` 的 `timed_out` 分支在官方 360/240 步边界精确触发。`_core/**` 零改动。测试 `tests/test_termination_contract.py`（6 条）锁定。
+- **修复前后机制差分**：用 git HEAD 的修复前 adapter 与工作区修复后 adapter，对真实 `_core.runner` 的 5 个场景对比（`evidence/g2_termination_differential.json`）：`num_steps`/`chain_length`/`success` **全部相同**，仅超时场景 termination 由 `partial` 变为 `timed_out`。
+- **计分代码字节码审计**（`evidence/g1_static_audit.json`）：仅 `CalvinAdapter.__init__/_lh_step/_mtlc_step/reset_episode` 变化；观测/编码/聚合/协议等计分函数字节码不变。`_core/bench_tool/result.py` 与 benchmark-libero 逐字节一致。
+- **同 session official vs Forge（N=5）**：official `[0,1,3,0,1]`，Forge `[0,1,3,0,1]`，**5/5 逐序列一致**。
+  > 说明：序列集确定，但 MCIL 为随机策略，跨 session/设备其输出可能整体漂移——本机重跑官方 evaluator 自身即由记录时的 `[0,1,0]` 变为 `[0,1,3]`。故判据 A 的判据是**同一 session 内 official 与 Forge 同跑一致**，不是与历史某次数值相同。
+
+### MTLC 端到端验收
+
+- **全量索引映射等价**：取官方 `task_D_D/validation/ep_start_end_ids.npy`（4 episodes），用官方 `DiskDataset(key="vis")` 的 `episode_lookup` 与 adapter `_episode_lookup_from_bounds` 比对：长度均 98958、**0 mismatch**，全部 334 个 checkpoint id 有效（max 97777）。
+- **逐 trial 对照**：因全量 task_D_D（177GB）不在本机，用过滤到 debug 有效 id 的 checkpoint 副本（12 任务 / 22 trial），官方 `evaluate_policy_singlestep` 的 `rollout` 与 Forge MTLC 两节点同数据对照：**22/22 逐 trial 一致**（task/dataset_id/solved），两侧均 3/22 成功。证据：`evidence/official_mtlc.json`、`evidence/forge_mtlc/*.json`、`evidence/mtlc_comparison.json`。
+
 ### 最终候选代码 Runtime Smoke
 
 最终候选代码（refactor 后）额外执行了一次端到端对照（`get_sequences(1000)[:5]`）：Official 与 Forge 的 `chain_length` 均为 `[0,1,3,0,1]`，**逐序列 5/5 一致，`avg=1.0`**。同时 stub 两节点冒烟：观测数 == 动作数（`obs == act`），结果 JSON 正常落盘，MCIL 权重与 384 维语言嵌入加载正常，无 traceback/`KeyError`。
@@ -133,6 +159,7 @@ python compare_acceptance.py --official official_repr20.json \
 5. **缺启动观测自检日志**：未打印分辨率/语义 → 构造时打印 observation contract（并写入 `reproducibility`）。
 6. **`close()` 未吞异常**：→ 加 `try/except`。
 7. **adapter 代码清理 R1–R6**（行为无损）：兼容层集中、观测契约去重、`step` 拆 `_lh_step`/`_mtlc_step`、`MtlcProtocol` 状态机化、删除死代码、分区/常量。
+8. **三态终止修复**：子任务预算耗尽此前被共享核心记为 `partial`（`_core` 无 timed_out 通道）；在 adapter 翻译层发布 `cfg.max_steps` 截止步使 `timed_out` 精确触发，计分不变（见「三态终止修复」节）。
 
 ### 最终代码版本
 
@@ -147,16 +174,23 @@ benchmark-libero: e01cd66（shared _core 来源）
 CALVIN:           fa03f01（calvin_env 1431a46）
 ```
 
-Pre-commit gate：
+> 追加工作区改动（**未提交**）：`adapters/calvin_adapter.py`（三态终止修复）、
+> `tests/test_termination_contract.py`（新增）、`tests/test_review_contract.py`（计数器初始化）、
+> `README.md` / `dataflow.example.yaml`（文档）。共享 `_core/**`、`bench_tool/**`、`result.py` 未动。
+
+Pre-commit gate（三态终止修复后重跑）：
 
 ```text
 git diff --check                     PASS
 py_compile                           PASS
-pytest                               PASS (80 passed)
+pytest                               PASS (86 passed；新增 6 条终止契约测试)
 受保护文件逐字节一致（_core/bench_tool/result.py vs benchmark-libero）  PASS
-diff 范围审计（无越界改动）           PASS
+diff 范围审计（无越界改动）           PASS（仅 adapter 翻译层 + 测试）
+计分函数字节码审计（g1）              PASS（仅 4 个终止管道 code object 变化）
 差分等价（旧 adapter vs 新 adapter，LH+MTLC）                         PASS
-end-to-end Official vs Forge（get_sequences(1000)[:5]）                 PASS (5/5)
+同 session Official vs Forge（get_sequences(1000)[:5]）               PASS (5/5, [0,1,3,0,1])
+MTLC 端到端（official vs Forge，22 trial）                            PASS (22/22)
+全量 MTLC 索引映射等价（334 id）                                      PASS (0 mismatch)
 ```
 
 checkpoint / 配置 / commit 已记录；结果 JSON 含 `mean_policy_latency_ms`（按 RoboDojo 口径，不额外测 CPU/GPU 峰值）。
@@ -176,3 +210,5 @@ Fisher exact p = 1.000, Wilson 95% CI overlap = true
 ```
 
 在当前 20-episode、同 checkpoint、同序列集合的测试条件下，Forge 两节点执行链路与官方 evaluator **逐序列一致**，满足 Benchmark 接入手册 v14.1 的判据 A。
+
+**补充（修复后）**：LH-MTLC 三态终止已修复为 `timed_out`（计分不变，经字节码审计 + 修复前后差分 + 同 session N=5 复验证明未破坏判据 A）；**MTLC 端到端已补做并 22/22 逐 trial 一致**。两条协议均满足手册 §3.4 / §8。

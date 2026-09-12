@@ -54,9 +54,15 @@ harness used a repo-external copy with L6 embeddings.
 
 - `main.py` differs by a small amount (LIBERO-only `sys.path` handling removed, log tag and
   `sys.exit` style); it is not modified further by this node.
-- Sub-task timeout is reported as `termination="partial"` with `metrics.timed_out_subtask=true`;
-  the shared `_core` only records `termination="timed_out"` for the episode-wide `max_steps`
-  backstop. The graded metrics (`avg_seq_len`, `SR1..SR5`) are unaffected.
+- Sub-task budget exhaustion is reported as `termination="timed_out"` (manual §3.4 rule 3 / §8).
+  CALVIN has no `failed` signal, so the only non-success terminal state is a timeout. The
+  adapter publishes the current sub-task deadline through the shared runner's `cfg.max_steps`
+  (cumulative actions + remaining sub-task budget) on every step, so the frozen `_core`
+  runner's `timed_out` branch fires on the exact official 360/240-action boundary. This is an
+  explicit adapter→core coupling: it relies on `_core/runner.py` re-reading `cfg.max_steps`
+  each step and on `_core/session.py` sharing the live cfg object with the adapter. It is
+  locked by `tests/test_termination_contract.py`; the graded metrics (`avg_seq_len`,
+  `SR1..SR5`, `num_steps`, `success`) are unchanged.
 - CALVIN joint names / state semantics are derived in the adapter from the dataset
   `merged_config.yaml` (`_resolve_state_names`) rather than declared as `config.py` constants.
 

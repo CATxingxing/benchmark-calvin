@@ -23,8 +23,10 @@ out/
 config.yaml
 config.policy_smoke.yaml
 config.smoke.yaml
+config.mtlc_smoke.yaml
 dataflow.yaml
 dataflow.stub.yaml
 dataflow.policy.yaml
 dataflow.policy_smoke.yaml
+dataflow.mtlc.yaml
 

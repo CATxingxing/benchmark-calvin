@@ -334,6 +334,12 @@ class CalvinAdapter:
         self._task_id: int | None = None
         self._obs: dict[str, Any] | None = None
         self._episode_metrics: dict[str, Any] = {}
+        # Cumulative action counters.  They let the adapter publish the current
+        # official sub-task deadline through the shared runner's ``max_steps``
+        # so budget exhaustion is reported as ``timed_out`` (manual §3.4 rule 3);
+        # see ``_lh_step`` / ``_mtlc_step``.
+        self._lh_actions = 0
+        self._mtlc_actions = 0
 
         self._mtlc_trials: list[tuple[str, int]] = []
         self._mtlc_episode_lookup: np.ndarray | None = None
@@ -660,6 +666,7 @@ class CalvinAdapter:
         if self.cfg.protocol == "lh_mtlc":
             self._protocol = LhMtlcProtocol(tuple(sequence), self._language, max_actions=LH_MAX_ACTIONS)
             self._protocol.begin(start_info)
+            self._lh_actions = 0
         else:
             self._protocol = None
             if self._mtlc_protocol is None:
@@ -667,6 +674,7 @@ class CalvinAdapter:
             self._mtlc_protocol.begin(str(self._mtlc_trials[task_id][0]), start_info)
             self._episode_metrics["steps"] = 0
             self._episode_metrics["dataset_id"] = self._mtlc_trials[task_id][1]
+            self._mtlc_actions = 0
         return self._obs
 
     def step(self, action: np.ndarray) -> StepOutcome:
@@ -687,10 +695,21 @@ class CalvinAdapter:
         # after every executed action, including action 360.
         result = self._protocol.observe(env.get_info(), self._oracle)
         self._episode_metrics.update(result)
+        # Publish the current sub-task deadline through the shared runner's
+        # ``max_steps``.  When the official 360-action budget is exhausted the
+        # deadline lands exactly on the current cumulative step, so the frozen
+        # runner records ``timed_out`` instead of the default ``partial`` label
+        # (manual §3.4 rule 3 / §8 "three states distinguishable").  Scored
+        # quantities (``chain_length``, ``num_steps``, ``success``) are unchanged.
+        self._lh_actions += 1
+        self.cfg.max_steps = self._lh_actions + (
+            self._protocol.max_actions - self._protocol.actions
+        )
+        timed_out = bool(result.get("timed_out_subtask"))
         return StepOutcome(
             obs=obs,
             reward=float(reward),
-            done=bool(result["done"]),
+            done=bool(result["done"]) and not timed_out,
             success=bool(result["success"]),
             metrics=dict(self._episode_metrics),
             next_instruction=result.get("next_instruction"),
@@ -709,10 +728,17 @@ class CalvinAdapter:
         )
         if result.get("failed_subtask"):
             self._episode_metrics["failed_subtask"] = result["failed_subtask"]
+        # Same deadline publication as ``_lh_step``: the official 240-action
+        # budget is reported as ``timed_out`` at the exact final step.
+        self._mtlc_actions += 1
+        self.cfg.max_steps = self._mtlc_actions + (
+            self._mtlc_protocol.max_actions - result["steps"]
+        )
+        timed_out = bool(result["done"] and not result["success"])
         return StepOutcome(
             obs=obs,
             reward=float(reward),
-            done=bool(result["done"]),
+            done=bool(result["done"]) and not timed_out,
             success=bool(result["success"]),
             metrics=dict(self._episode_metrics),
         )

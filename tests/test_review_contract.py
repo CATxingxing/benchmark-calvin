@@ -163,6 +163,7 @@ def test_lh_adapter_ignores_environment_done():
     adapter._protocol = LhMtlcProtocol(("a", "b", "c", "d", "e"), lambda task: task)
     adapter._protocol.begin(adapter._env.get_info())
     adapter._episode_metrics = {"sequence_length": 5, "chain_length": 0, "subtasks": ["a", "b", "c", "d", "e"]}
+    adapter._lh_actions = 0
     outcome = adapter.step(np.zeros(7))
     assert outcome.success is False
     assert outcome.done is False
@@ -180,6 +181,7 @@ def test_mtlc_adapter_ignores_environment_done_before_240():
     adapter._mtlc_protocol.begin("a", {"robot_info": {}, "scene_info": {}})
     adapter._oracle = _NeverOracle()
     adapter._episode_metrics = {"steps": 0, "chain_length": 0, "subtasks": ["a"]}
+    adapter._mtlc_actions = 0
     outcome = adapter.step(np.zeros(7))
     assert outcome.success is False
     assert outcome.done is False

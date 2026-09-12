@@ -1,5 +1,17 @@
 # Minimal CALVIN ↔ Policy Dora graph.  Replace executable paths and choose a
 # policy config; the adapter contract itself is policy-independent.
+#
+# Policy-side prerequisites (manual §3.5; judge-A reproducibility):
+#   1. Handle cross-channel reordering: a new `set_instruction` arms a gate that
+#      the following `reset_scene` clears before the segment's first observation
+#      is acted on, so `model.reset()` always precedes the first action even if
+#      the observation is delivered before the commands (dora does not guarantee
+#      cross-channel order). Without this a policy can silently hover.
+#   2. Align RNG with the official evaluator for a stochastic policy: call
+#      `seed_everything(0)` after model construction and before the first
+#      `model.step` (see `calvin-real-policy/real_policy.py`). Otherwise MCIL
+#      replan sampling drifts run-to-run and judge-A per-sequence equality fails
+#      for reasons outside the benchmark node.
 nodes:
   - id: calvin_benchmark
     path: ./.venv/bin/python
