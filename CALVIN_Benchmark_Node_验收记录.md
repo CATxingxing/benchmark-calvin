@@ -87,7 +87,7 @@ python compare_acceptance.py --official official_repr20.json \
 - Official 与 Forge 均执行同一批 `get_sequences(1000)[:20]`，无重复、无缺失；
 - checkpoint、协议、robot/action type、seed、episode 数保持一致。
 
-### 判定
+### 判定（LH-MTLC验收实验）
 
 | 条件 | 结果 |
 | :--- | :--- |
@@ -111,22 +111,15 @@ python compare_acceptance.py --official official_repr20.json \
 | :--- | :--- | :--- |
 | P1-1 N=20 统计功效不足 | 已由 N=50 回应 | 已有 official/Forge 各 50：逐序列 **50/50** 一致、Fisher p=1.0（`evidence/acceptance_comparison_L6.json`）。逐序列一致强于统计非劣。 |
 | P1-2 复现材料不入库 | 不处理（合理） | harness 为 validation-only、非交付物；记录含完整复现步骤，手册未要求其入库。 |
-| P1-3 三态终止偏离 | **已修复** | 子任务预算耗尽现记 `timed_out`（见下节）；`chain_length`/`num_steps` 不变。 |
+| P1-3 三态终止偏离 | **已修复** | 子任务预算耗尽现记 `timed_out`；`chain_length`/`num_steps` 不变。 |
 | P1-4 policy 侧 RNG 前置 | 非接入错误，仅记前置 | benchmark 节点逐位确定；随机性属 MCIL。验证策略已按官方 `seed_everything(0)`（模型加载后、首次 step 前）。 |
 | P2-4 policy 侧门控前置 | 非 benchmark 缺陷 | dora 跨通道乱序是框架性质，手册 §3.1 已列已知、watchdog 为待办；修复需动共享 `_core`（硬约束禁止）。前置条件已写入 README 与 `dataflow.example.yaml`。 |
-| P2-5 MTLC 无端到端 | **已补做** | 见「MTLC 端到端验收」：22/22 逐 trial 一致 + 全量映射算法等价。 |
+| P2-5 MTLC 无端到端 | **已补做** | 见「补充：MTLC 验收实验」：22/22 逐 trial 一致 + 全量映射算法等价。 |
 | P2-6 靶子/全量 | 不处理（合理） | 全量 task_D_D 177GB 不可得；leaderboard 数字基于全量验证集，与 debug 20/50 不可比。 |
 | P2-7 文档矛盾 | 已修正+说明 | `robot_obs` 逐位相同、`scene_obs` 存在 ~0.002 物理残差（未覆盖速度自由度）；图像不逐位属渲染器固有（两个独立官方 env 同样不一致）；不测 CPU/GPU 峰值不影响正确性。 |
 
-### 三态终止修复与修复前后等价（判据 A 未被破坏）
 
-- **修复**：`adapters/calvin_adapter.py` 在 `_lh_step`/`_mtlc_step` 每步把 `cfg.max_steps` 设为当前子任务截止步（累计步数 + 剩余预算），并在预算耗尽时把 `StepOutcome.done` 由 True 改为 False，使冻结 `_core` 的 `timed_out` 分支在官方 360/240 步边界精确触发。`_core/**` 零改动。测试 `tests/test_termination_contract.py`（6 条）锁定。
-- **修复前后机制差分**：用 git HEAD 的修复前 adapter 与工作区修复后 adapter，对真实 `_core.runner` 的 5 个场景对比（`evidence/g2_termination_differential.json`）：`num_steps`/`chain_length`/`success` **全部相同**，仅超时场景 termination 由 `partial` 变为 `timed_out`。
-- **计分代码字节码审计**（`evidence/g1_static_audit.json`）：仅 `CalvinAdapter.__init__/_lh_step/_mtlc_step/reset_episode` 变化；观测/编码/聚合/协议等计分函数字节码不变。`_core/bench_tool/result.py` 与 benchmark-libero 逐字节一致。
-- **同 session official vs Forge（N=5）**：official `[0,1,3,0,1]`，Forge `[0,1,3,0,1]`，**5/5 逐序列一致**。
-  > 说明：序列集确定，但 MCIL 为随机策略，跨 session/设备其输出可能整体漂移——本机重跑官方 evaluator 自身即由记录时的 `[0,1,0]` 变为 `[0,1,3]`。故判据 A 的判据是**同一 session 内 official 与 Forge 同跑一致**，不是与历史某次数值相同。
-
-### MTLC 端到端验收
+### 补充：MTLC 验收实验（LH-MTLC验收实验在上面）
 
 - **全量索引映射等价**：取官方 `task_D_D/validation/ep_start_end_ids.npy`（4 episodes），用官方 `DiskDataset(key="vis")` 的 `episode_lookup` 与 adapter `_episode_lookup_from_bounds` 比对：长度均 98958、**0 mismatch**，全部 334 个 checkpoint id 有效（max 97777）。
 - **逐 trial 对照**：因全量 task_D_D（177GB）不在本机，用过滤到 debug 有效 id 的 checkpoint 副本（12 任务 / 22 trial），官方 `evaluate_policy_singlestep` 的 `rollout` 与 Forge MTLC 两节点同数据对照：**22/22 逐 trial 一致**（task/dataset_id/solved），两侧均 3/22 成功。证据：`evidence/official_mtlc.json`、`evidence/forge_mtlc/*.json`、`evidence/mtlc_comparison.json`。
@@ -152,7 +145,7 @@ python compare_acceptance.py --official official_repr20.json \
 
 说明：扰动一个动作分量即导致状态显著偏离；正向时 `robot_obs` 逐位相同。
 
-**遗留项 / 已知偏差（均不影响判据 A，且非接入错误）**
+**备注项（均不影响判据 A，且非接入错误）**
 
 1. **`scene_obs` 的 ~0.002 残差**：同一 env 反复 reset 时，`env.reset(robot_obs, scene_obs)` 只恢复这两个数组、未覆盖速度等自由度，两次独立 reset 间可有 ~0.002 物理残差（`deterministic_trace_negative_control.json`：`forward_robot_maxdiff=0.0`、`forward_scene_maxdiff=0.002`）。属 CALVIN 环境 init-state 覆盖度问题（手册 §7 陷阱 1 同类）；official 与 Forge 的 fresh-env trace 中 `robot_obs`/`scene_obs` 均 0 mismatch，TaskOracle 不受影响。**不可改**：修物理不属 benchmark 接入职责，改渲染/物理也非正解。
 2. **图像 bit-level 不一致**：pybullet/EGL 跨 client 渲染固有，两个独立官方 env 同样不一致（RoboDojo 记录的 Isaac Sim 渲染亦同此现象）。故按**状态层面对齐**，不强制图像逐位。**不可改**：属渲染器性质，非 benchmark 接口语义。
@@ -166,7 +159,7 @@ python compare_acceptance.py --official official_repr20.json \
 5. **缺启动观测自检日志**：未打印分辨率/语义 → 构造时打印 observation contract（并写入 `reproducibility`）。
 6. **`close()` 未吞异常**：→ 加 `try/except`。
 7. **adapter 代码清理 R1–R6**（行为无损）：兼容层集中、观测契约去重、`step` 拆 `_lh_step`/`_mtlc_step`、`MtlcProtocol` 状态机化、删除死代码、分区/常量。
-8. **三态终止修复**：子任务预算耗尽此前被共享核心记为 `partial`（`_core` 无 timed_out 通道）；在 adapter 翻译层发布 `cfg.max_steps` 截止步使 `timed_out` 精确触发，计分不变（见「三态终止修复」节）。
+8. **三态终止修复**：子任务预算耗尽此前被共享核心记为 `partial`（`_core` 无 timed_out 通道）；在 adapter 翻译层发布 `cfg.max_steps` 截止步使 `timed_out` 精确触发，计分不变。
 
 ### 最终代码版本
 
@@ -181,7 +174,7 @@ benchmark-libero: e01cd66（shared _core 来源）
 CALVIN:           fa03f01（calvin_env 1431a46）
 ```
 
-> 追加工作区改动（**未提交**）：`adapters/calvin_adapter.py`（三态终止修复）、
+> 追加改动（commit `ccecba1`）：`adapters/calvin_adapter.py`（三态终止修复）、
 > `tests/test_termination_contract.py`（新增）、`tests/test_review_contract.py`（计数器初始化）、
 > `README.md` / `dataflow.example.yaml`（文档）。共享 `_core/**`、`bench_tool/**`、`result.py` 未动。
 
