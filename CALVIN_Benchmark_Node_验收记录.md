@@ -212,3 +212,13 @@ Fisher exact p = 1.000, Wilson 95% CI overlap = true
 在当前 20-episode、同 checkpoint、同序列集合的测试条件下，Forge 两节点执行链路与官方 evaluator **逐序列一致**，满足 Benchmark 接入手册 v14.1 的判据 A。
 
 **补充（修复后）**：LH-MTLC 三态终止已修复为 `timed_out`（计分不变，经字节码审计 + 修复前后差分 + 同 session N=5 复验证明未破坏判据 A）；**MTLC 端到端已补做并 22/22 逐 trial 一致**。两条协议均满足手册 §3.4 / §8。
+
+### 关于三态终止修复：不是修改官方语义，而是契约层级不匹配下的必要适配
+
+1. **官方语义**：CALVIN 官方评测没有 `success/failed/timed_out` 概念，只记录 `chain_length`；其终止规则是"某个子任务在 360/240 步预算内未完成，即结束整条链"。这是**子任务预算**，与手册 §3.7 的"单 episode 步数上限" `max_steps` 不是同一层级。
+2. **Forge 契约**：手册 §3.4/§8 要求 episode 终止态区分 `success / failed / timed_out`，因此"子任务预算耗尽"必须映射为 `timed_out`，否则三态无法区分。
+3. **冲突不在 adapter**：共享 `_core` 的 runner 只在 `step_idx >= max_steps`（episode 级）产出 `timed_out`，其余 `done && !success` 一律记 `partial`；且 `StepOutcome` 无"终止原因"字段，`_core/**` 须与 benchmark-libero 逐字节一致、禁止修改。即**共享核心没有给 adapter 提供表达"子任务超时"的通道**。
+4. **因此 adapter 的做法是合理的**：由 adapter 自行维护**累计动作计数与当前子任务截止步**，每步通过 `cfg.max_steps` 将该截止步传给冻结 runner，使 runner 恰在官方预算边界进入其**已有**的 `timed_out` 分支。这是在"不改共享核心、不改官方评测"前提下，**唯一能正确区分三态的方式**。
+5. **无副作用**：观测、动作、步数、`chain_length`、`success` 全部不变（已由字节码审计、修复前后差分、同 session official vs Forge N=5 验证），仅修正 Forge 层终止标签。
+
+**结论**：这不是接入错误，也不改变官方语义；是 CALVIN 特有"子任务超时"与 Forge 三态契约之间的层级差异所导致的、不可避免且必要的适配。
