@@ -91,6 +91,7 @@ python compare_acceptance.py --official official_repr20.json \
 
 | 条件 | 结果 |
 | :--- | :--- |
+| 官方 baseline 为明确非零成绩 | ✅（SR1 = 7/20 = 0.35，非零） |
 | 两节点 `dora run` 跑通 | ✅ |
 | 同 checkpoint | ✅ |
 | 同协议/序列集 | ✅ |
@@ -138,7 +139,8 @@ python compare_acceptance.py --official official_repr20.json \
 
 固定动作、同序列，官方 env 路径 vs Forge adapter：
 
-- `robot_obs`(15D)、`scene_obs`(24D)、TaskOracle：**逐帧逐位相同**；
+- `robot_obs`(15D)、TaskOracle：**逐帧逐位相同**；
+- `scene_obs`(24D)：official ↔ Forge **逐帧一致**（0 mismatch）；
 - 两路图像：跨 env 实例不一致（两个独立官方 env 亦复现；属 pybullet/EGL 渲染器跨 client 不确定性），不影响判分。
 
 **反向故障注入（negative control）** `BAD_ACTION_COMPONENT=0`、`BAD_ACTION_DELTA=0.25`：
@@ -148,7 +150,12 @@ python compare_acceptance.py --official official_repr20.json \
 | 正向（同动作、两次独立 reset） | **0.0（逐位相同）** | — |
 | 反向（注入扰动） | **6.24** | **第 0 帧** |
 
-说明：扰动一个动作分量即导致状态显著偏离；正向时 `robot_obs` 逐位相同。（`scene_obs` 存在 ~0.002 的物理残差，属 `scene_obs` 未覆盖速度自由度，已在下方遗留项说明）
+说明：扰动一个动作分量即导致状态显著偏离；正向时 `robot_obs` 逐位相同。
+
+**遗留项 / 已知偏差（均不影响判据 A，且非接入错误）**
+
+1. **`scene_obs` 的 ~0.002 残差**：同一 env 反复 reset 时，`env.reset(robot_obs, scene_obs)` 只恢复这两个数组、未覆盖速度等自由度，两次独立 reset 间可有 ~0.002 物理残差（`deterministic_trace_negative_control.json`：`forward_robot_maxdiff=0.0`、`forward_scene_maxdiff=0.002`）。属 CALVIN 环境 init-state 覆盖度问题（手册 §7 陷阱 1 同类）；official 与 Forge 的 fresh-env trace 中 `robot_obs`/`scene_obs` 均 0 mismatch，TaskOracle 不受影响。**不可改**：修物理不属 benchmark 接入职责，改渲染/物理也非正解。
+2. **图像 bit-level 不一致**：pybullet/EGL 跨 client 渲染固有，两个独立官方 env 同样不一致（RoboDojo 记录的 Isaac Sim 渲染亦同此现象）。故按**状态层面对齐**，不强制图像逐位。**不可改**：属渲染器性质，非 benchmark 接口语义。
 
 ### 接入过程中发现并修复的问题
 
