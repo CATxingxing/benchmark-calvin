@@ -213,7 +213,7 @@ Fisher exact p = 1.000, Wilson 95% CI overlap = true
 
 **补充（修复后）**：LH-MTLC 三态终止已修复为 `timed_out`（计分不变，经字节码审计 + 修复前后差分 + 同 session N=5 复验证明未破坏判据 A）；**MTLC 端到端已补做并 22/22 逐 trial 一致**。两条协议均满足手册 §3.4 / §8。
 
-### 关于三态终止修复：不是修改官方语义，而是契约层级不匹配下的必要适配
+### 关于三态终止修复：未修改官方语义，做了契约层级不匹配下的必要适配
 
 1. **官方语义**：CALVIN 官方评测没有 `success/failed/timed_out` 概念，只记录 `chain_length`；其终止规则是"某个子任务在 360/240 步预算内未完成，即结束整条链"。这是**子任务预算**，与手册 §3.7 的"单 episode 步数上限" `max_steps` 不是同一层级。
 2. **Forge 契约**：手册 §3.4/§8 要求 episode 终止态区分 `success / failed / timed_out`，因此"子任务预算耗尽"必须映射为 `timed_out`，否则三态无法区分。
