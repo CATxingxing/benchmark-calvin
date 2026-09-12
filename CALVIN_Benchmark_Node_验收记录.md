@@ -105,7 +105,7 @@ python compare_acceptance.py --official official_repr20.json \
 
 **结论：CALVIN Benchmark Node 通过正式验收（判据 A）。** Official 与 Forge 在 20 条序列上逐序列完全一致（SR1 均 7/20，`avg_seq_len` 均 0.35），Wilson 区间重合，Fisher `p = 1.0`，没有观察到统计上可区分的差异。因此现有证据支持：**Forge 两节点执行链路没有系统性改变 CALVIN LH-MTLC 的任务、场景、观测、动作与评分语义。**
 
-### 外部审查问题回应（精简）
+### 外部审查（交叉验证）问题回应（精简）
 
 | 审查问题 | 结论 | 依据 |
 | :--- | :--- | :--- |
