@@ -4,6 +4,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 results/
+dist/
+build/
 
 # large / runtime / acceptance artifacts — never commit
 *.ckpt
@@ -29,4 +31,6 @@ dataflow.stub.yaml
 dataflow.policy.yaml
 dataflow.policy_smoke.yaml
 dataflow.mtlc.yaml
+dataflow.frozen_stub.yaml
+dataflow.frozen_policy.yaml
 

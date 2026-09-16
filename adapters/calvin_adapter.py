@@ -41,13 +41,65 @@ OBSERVATION_SEMANTICS = (
 # ===========================================================================
 
 
-def _configure_calvin_import_paths() -> None:
-    """Keep CALVIN_ROOT support inside the benchmark-specific adapter layer.
+def _host_stdlib_paths(host_site: str) -> list[str]:
+    """Derive the host interpreter's stdlib dirs from a site-packages path.
 
-    This is the same path bootstrap that previously lived in ``main.py``; it is
-    executed at adapter-module import time so runtime import behaviour is
-    preserved while the generic node entrypoint no longer knows CALVIN paths.
+    The thin frozen node bundles only the stdlib it uses; host code
+    (``torch`` / ``scipy`` / ``pybullet`` ...) imports stdlib modules that were
+    not collected (e.g. ``pickletools``).  Read ``pyvenv.cfg`` and expose the
+    base interpreter's stdlib + ``lib-dynload`` so missing modules fall back to
+    the host, while the frozen copies still win for bundled modules.
     """
+    result: list[str] = []
+    site = Path(host_site).resolve()
+    if site.name != "site-packages" or site.parent.parent.name != "lib":
+        return result
+    py_dir = site.parent  # <venv>/lib/pythonX.Y
+    result.extend([str(py_dir), str(py_dir / "lib-dynload")])
+    venv_root = py_dir.parent.parent
+    cfg = venv_root / "pyvenv.cfg"
+    if cfg.is_file():
+        try:
+            for line in cfg.read_text(encoding="utf-8").splitlines():
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "home":
+                    base_lib = (
+                        Path(value.strip()).parent
+                        / "lib"
+                        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                    )
+                    result.extend([str(base_lib), str(base_lib / "lib-dynload")])
+                    break
+        except OSError:
+            pass
+    return [p for p in result if Path(p).is_dir()]
+
+
+def _configure_calvin_import_paths() -> None:
+    """Keep host-path bootstrapping inside the benchmark-specific adapter layer.
+
+    Executed at adapter-module import time, i.e. *after* the frozen protocol
+    dependencies (numpy / dora / forge_msgs) have been imported and *before* any
+    host-provided module is imported.  Two sources are injected:
+
+    * ``CALVIN_HOST_SITE`` — the host evaluation environment's site-packages
+      (thin frozen node: ``calvin_env`` / ``calvin_models`` / ``pybullet`` /
+      ``torch`` ... live in the host, not in the bundle), plus the host
+      interpreter's stdlib for modules the thin bundle did not collect.
+      Appended, never inserted at position 0, so it cannot shadow the frozen
+      dependencies.
+    * ``CALVIN_ROOT`` — the CALVIN checkout (``calvin_env`` / ``calvin_models``
+      / bundled ``tacto``); used in both source and frozen modes.
+    """
+    host_site = os.environ.get("CALVIN_HOST_SITE")
+    if host_site:
+        for entry in host_site.split(os.pathsep):
+            if entry and entry not in sys.path:
+                sys.path.append(entry)
+            for derived in _host_stdlib_paths(entry):
+                if derived not in sys.path:
+                    sys.path.append(derived)
+
     calvin_root = os.environ.get("CALVIN_ROOT")
     if not calvin_root:
         return
