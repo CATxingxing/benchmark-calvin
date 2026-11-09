@@ -15,7 +15,7 @@ Set `CALVIN_ROOT` to the pinned CALVIN checkout, point `dataset_path` at the CAL
 `suites: [lh_mtlc, mtlc]` makes one node instance serve both protocols. `suite`/`protocol` remain the default and must be in the list. Every listed suite is validated at load time (MTLC needs `checkpoint_path`; LH-MTLC needs `sequence_count: 1000` unless `smoke: true`) and prepared once when the adapter starts.
 
 - `benchmark.describe` returns `suites: [{suite, num_tasks, tasks, defaults: {max_steps}}]` next to the default suite's fields.
-- `benchmark.run` accepts `suite`; omitted means the default. Task ids, init states and the default `max_steps` (1800 / 240) are resolved against that suite. An unknown suite is rejected synchronously with `BENCH_INVALID_ARGUMENT`.
+- `benchmark.run` accepts `suite`; omitted means the default. Task ids, init states and the default `max_steps` (1800 / 240) are resolved against that suite. An unknown suite is accepted by the gateway (HTTP 202) and the invocation then fails with `BENCH_INVALID_ARGUMENT`.
 - The run outputs keep the seven required fields and add `suite`, `primary_metric`, `metrics` (LH-MTLC: `avg_seq_len` via `primary_metric`, `SR1`–`SR5`, `per_task`; MTLC: `success_rate`, `per_task`), `is_full_suite` and `args`.
 - `is_full_suite` is true only when the run succeeded and covered every task and init state of the selected suite. It checks coverage, not the dataset: a debug dataset or a `smoke` config yields a smaller suite and is not an official score.
 
