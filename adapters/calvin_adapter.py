@@ -398,7 +398,11 @@ class CalvinAdapter:
         self._mtlc_name_pattern: tuple[Path, str] | None = None
         self._mtlc_n_digits: int | None = None
 
-        if cfg.protocol == "mtlc":
+        # Every configured suite is prepared once so a single runtime can run
+        # either protocol; ``_sequences`` then follows ``self.cfg.protocol``.
+        self._suite_sequences: dict[str, list[tuple[Mapping[str, Any], list[str]]]] = {}
+        suites = tuple(getattr(cfg, "suites", None) or (cfg.protocol,))
+        if "mtlc" in suites:
             task_map = self._load_task_to_id_dict()
             self._mtlc_protocol = MtlcProtocol(task_map)
             for task in task_map:
@@ -407,24 +411,38 @@ class CalvinAdapter:
                 )
             if not self._mtlc_trials:
                 raise ValueError("MTLC checkpoint task_to_id_dict produced no evaluation trials")
-            self._sequences = [({}, [task]) for task, _ in self._mtlc_trials]
+            self._suite_sequences["mtlc"] = [({}, [task]) for task, _ in self._mtlc_trials]
             self._prepare_mtlc_dataset_mapping()
-        else:
+        if "lh_mtlc" in suites:
             if sequences is None:
                 from calvin_agent.evaluation.multistep_sequences import get_sequences
 
                 sequences = list(get_sequences(int(cfg.sequence_count)))
-            self._sequences = [(state, list(sequence)) for state, sequence in sequences]
-            if len(self._sequences) != int(cfg.sequence_count):
+            lh_sequences = [(state, list(sequence)) for state, sequence in sequences]
+            if len(lh_sequences) != int(cfg.sequence_count):
                 raise RuntimeError("get_sequences returned an unexpected sequence count")
-            if any(len(sequence) != 5 for _, sequence in self._sequences):
+            if any(len(sequence) != 5 for _, sequence in lh_sequences):
                 raise RuntimeError("every CALVIN LH-MTLC sequence must contain exactly five subtasks")
+            self._suite_sequences["lh_mtlc"] = lh_sequences
+        if cfg.protocol not in self._suite_sequences:
+            raise ValueError(f"default protocol {cfg.protocol!r} is not among prepared suites {list(suites)}")
 
         if self._oracle is None:
             self._oracle = self._load_task_oracle()
         self._state_names = self._resolve_state_names()
         self._native_cameras = self._resolve_native_cameras()
         self._log_observation_contract()
+
+    @property
+    def _sequences(self) -> list[tuple[Mapping[str, Any], list[str]]]:
+        prepared = self.__dict__.get("_suite_sequences") or {}
+        protocol = self.cfg.protocol
+        if protocol not in prepared:
+            raise ValueError(f"suite {protocol!r} was not prepared by this adapter; prepared: {list(prepared)}")
+        return prepared[protocol]
+
+    def available_suites(self) -> tuple[str, ...]:
+        return tuple(self.__dict__.get("_suite_sequences") or ())
 
     # ---- official CALVIN sources ------------------------------------------
 

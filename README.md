@@ -10,6 +10,17 @@ Exactly two Dora nodes are used: this benchmark node owns the CALVIN environment
 
 Set `CALVIN_ROOT` to the pinned CALVIN checkout, point `dataset_path` at the CALVIN dataset root, and explicitly configure `suite`, `protocol`, `action_mode`, and `policy_id`. MTLC additionally requires `checkpoint_path` so `task_to_id_dict` comes from the official checkpoint. Unknown Policy I/O semantics are not guessed.
 
+## Multiple suites in one runtime
+
+`suites: [lh_mtlc, mtlc]` makes one node instance serve both protocols. `suite`/`protocol` remain the default and must be in the list. Every listed suite is validated at load time (MTLC needs `checkpoint_path`; LH-MTLC needs `sequence_count: 1000` unless `smoke: true`) and prepared once when the adapter starts.
+
+- `benchmark.describe` returns `suites: [{suite, num_tasks, tasks, defaults: {max_steps}}]` next to the default suite's fields.
+- `benchmark.run` accepts `suite`; omitted means the default. Task ids, init states and the default `max_steps` (1800 / 240) are resolved against that suite. An unknown suite is rejected synchronously with `BENCH_INVALID_ARGUMENT`.
+- The run outputs keep the seven required fields and add `suite`, `primary_metric`, `metrics` (LH-MTLC: `avg_seq_len` via `primary_metric`, `SR1`–`SR5`, `per_task`; MTLC: `success_rate`, `per_task`), `is_full_suite` and `args`.
+- `is_full_suite` is true only when the run succeeded and covered every task and init state of the selected suite. It checks coverage, not the dataset: a debug dataset or a `smoke` config yields a smaller suite and is not an official score.
+
+Legacy configs without `suites` behave as before (one suite).
+
 ## Official semantics preserved
 
 - LH-MTLC uses the official `get_sequences(1000)` set, one environment reset per 5-subtask sequence, official validation language, fresh TaskOracle start-info per subtask, and a 360-action budget per subtask.
@@ -22,6 +33,8 @@ Set `CALVIN_ROOT` to the pinned CALVIN checkout, point `dataset_path` at the CAL
 ## Reference-core boundary
 
 `_core/`, `bench_tool/`, and `result.py` are intended to remain byte-identical to the corresponding files in the reference `benchmark-libero` revision used for this integration. Benchmark-specific changes should stay in `adapters/`, `config.py`, examples, and minimal assembly code.
+
+Known divergence (multi-suite support): `_core/session.py` (per-suite `suites` in capabilities; `BenchSession` honours `plan["suite"]` via `cfg.with_suite` and restores `adapter.cfg` when validation fails), `bench_tool/endpoints.py` (`suite` in `normalize_plan`, `suites` in the describe whitelist, extended outputs) and `bench_tool/result_shape.py` (optional extended outputs, `is_full_suite`). The suite logic is opt-in: a config without `with_suite`/`available_suites` and a plan without `suite` behave exactly as the reference. The extended outputs are always emitted, so a reference gateway schema with `additionalProperties: false` must list them. These changes are candidates to upstream into `benchmark-libero`.
 
 ## Observation contract and startup self-check
 

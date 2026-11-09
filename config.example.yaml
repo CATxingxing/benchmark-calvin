@@ -5,6 +5,12 @@ dataset_path: ../calvin/dataset/calvin_debug_dataset
 action_mode: absolute_euler
 sequence_count: 1000
 policy_id: calvin_policy
+# Optional: let one runtime serve both suites; each run picks one with
+# `suite`. `suite`/`protocol` above stay the default. Listing mtlc requires
+# checkpoint_path (task_to_id_dict) and a dataset with the official MTLC
+# ep_start_end_ids.npy + reset frames.
+# suites: [lh_mtlc, mtlc]
+# checkpoint_path: ../models/mcil/D_D_static_rgb_baseline/mcil_baseline.ckpt
 # Small implementation smoke: load/validate the official 1000-sequence set,
 # but only roll out the selected Forge episode(s). Remove task_ids for full LH-MTLC.
 task_ids: [0]

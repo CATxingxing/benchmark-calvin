@@ -59,6 +59,56 @@ def capabilities_payload(
     benchmark 特有的口径（LIBERO 的 layout_mode/control_mode 之类）一律走
     `adapter.reproducibility()` 原样透传，_core 不认识它们。
     """
+    payload = _suite_payload(cfg, adapter)
+    repro = getattr(adapter, "reproducibility", None)
+    try:
+        reproducibility = dict(repro()) if callable(repro) else {}
+    except Exception:  # noqa: BLE001
+        reproducibility = {}
+
+    result = {
+        "benchmark": cfg.benchmark,
+        "suite": cfg.suite,
+        "policy_id": cfg.policy_id,
+        "num_tasks": payload["num_tasks"],
+        "tasks": payload["tasks"],
+        "joint_names": list(adapter.state_joint_names()),
+        "camera_ids": _camera_ids(cfg, adapter),
+        "defaults": {
+            "num_runs": cfg.num_runs,
+            "seed": cfg.seed,
+            "max_steps": cfg.max_steps,
+        },
+        "limits": dict(limits or {}),
+        "reproducibility": reproducibility,
+    }
+
+    # 多 suite（目前只有 CALVIN）：cfg 提供 available_suites()/with_suite()，
+    # 每个 suite 的 task 清单要在对应 cfg 下向 adapter 取。adapter.cfg 只是临时
+    # 切过去，算完立刻还原；单 suite 的 benchmark 不受影响。
+    available = getattr(cfg, "available_suites", None)
+    with_suite = getattr(cfg, "with_suite", None)
+    if callable(available) and callable(with_suite) and hasattr(adapter, "cfg"):
+        original = adapter.cfg
+        suites: list[dict[str, Any]] = []
+        try:
+            for name in available():
+                suite_cfg = with_suite(name)
+                adapter.cfg = suite_cfg
+                entry = _suite_payload(suite_cfg, adapter)
+                suites.append({
+                    "suite": name,
+                    "num_tasks": entry["num_tasks"],
+                    "tasks": entry["tasks"],
+                    "defaults": {"max_steps": suite_cfg.max_steps},
+                })
+        finally:
+            adapter.cfg = original
+        result["suites"] = suites
+    return result
+
+
+def _suite_payload(cfg: BaseBenchmarkConfig, adapter: Any) -> dict[str, Any]:
     names = getattr(adapter, "tasks", None)
     tasks: list[dict[str, Any]] = []
     for task_id in range(adapter.num_tasks):
@@ -73,29 +123,7 @@ def capabilities_payload(
         except Exception:  # noqa: BLE001 拿不到指令不该挡住 describe
             entry["language"] = ""
         tasks.append(entry)
-
-    repro = getattr(adapter, "reproducibility", None)
-    try:
-        reproducibility = dict(repro()) if callable(repro) else {}
-    except Exception:  # noqa: BLE001
-        reproducibility = {}
-
-    return {
-        "benchmark": cfg.benchmark,
-        "suite": cfg.suite,
-        "policy_id": cfg.policy_id,
-        "num_tasks": int(adapter.num_tasks),
-        "tasks": tasks,
-        "joint_names": list(adapter.state_joint_names()),
-        "camera_ids": _camera_ids(cfg, adapter),
-        "defaults": {
-            "num_runs": cfg.num_runs,
-            "seed": cfg.seed,
-            "max_steps": cfg.max_steps,
-        },
-        "limits": dict(limits or {}),
-        "reproducibility": reproducibility,
-    }
+    return {"num_tasks": int(adapter.num_tasks), "tasks": tasks}
 
 
 # ------------------------------------------------------------------- 一次执行
@@ -120,8 +148,15 @@ class BenchSession:
     ) -> None:
         self.invocation_id = invocation_id
         self._log = log
+        base = cfg_template
+        suite = plan.get("suite")
+        if suite is not None and suite != cfg_template.suite:
+            with_suite = getattr(cfg_template, "with_suite", None)
+            if not callable(with_suite):
+                raise ValueError(f"本 benchmark 只有 suite {cfg_template.suite!r}，不能切到 {suite!r}")
+            base = with_suite(suite)
         self.cfg = replace(
-            cfg_template,
+            base,
             task_ids=[int(t) for t in plan["task_ids"]],
             init_state_ids=[int(i) for i in plan["init_state_ids"]],
             num_runs=int(plan["num_runs"]),
@@ -131,7 +166,20 @@ class BenchSession:
         # 权威兜底校验。endpoint 侧拿 capabilities 也校验了一遍，但那份可能
         # 与 adapter 的真实清单不一致；这里抛出来会被上层转成同步拒绝，
         # 而不是"跑起来之后失败"。
-        resolve_and_validate_plan(self.cfg, adapter)
+        #
+        # 多 suite 时 adapter 的 task 清单取决于 adapter.cfg，所以先回写再校验；
+        # 校验失败要把 adapter.cfg 还原，否则被拒的请求会把下一次 describe/run
+        # 带到错的 suite 上。
+        has_cfg = hasattr(adapter, "cfg")
+        previous = adapter.cfg if has_cfg else None
+        if has_cfg:
+            adapter.cfg = self.cfg
+        try:
+            resolve_and_validate_plan(self.cfg, adapter)
+        except Exception:
+            if has_cfg:
+                adapter.cfg = previous
+            raise
 
         # **adapter 会回读 cfg，必须让它和 runner 看的是同一个对象。**
         # LiberoAdapter 在构造时存了 `self.cfg`，并在 reset_episode / _ensure_env
