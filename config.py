@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
@@ -69,7 +70,7 @@ def _validate_id_spec(value: Any, *, field: str) -> None:
 def load_config(path: str | Path) -> CalvinConfig:
     data = read_yaml(path)
 
-    dataset_path = data.get("dataset_path")
+    dataset_path = data.get("dataset_path") or os.environ.get("CALVIN_DATASET")
     if not isinstance(dataset_path, str) or not dataset_path.strip():
         raise ValueError("dataset_path is required and must be the CALVIN dataset root")
     protocol = data.get("protocol", "lh_mtlc")
@@ -90,11 +91,17 @@ def load_config(path: str | Path) -> CalvinConfig:
 
     cfg = CalvinConfig()
     fill_base(cfg, data)
+    # Forge clients run outside the node's working directory. Return stable,
+    # directly usable artifact paths even when the YAML uses relative paths.
+    for field in ("result_dir", "record_dir"):
+        value = getattr(cfg, field)
+        if value:
+            setattr(cfg, field, str(Path(value).expanduser().resolve()))
     cfg.dataset_path = dataset_path
     cfg.protocol = protocol
     cfg.action_mode = action_mode
     cfg.sequence_count = _strict_positive_int(data.get("sequence_count", cfg.sequence_count), field="sequence_count")
-    cfg.checkpoint_path = data.get("checkpoint_path", cfg.checkpoint_path)
+    cfg.checkpoint_path = data.get("checkpoint_path") or os.environ.get("MCIL_CHECKPOINT", cfg.checkpoint_path)
 
     # Official evaluator inputs are intentionally not configurable here.
     # Language annotations and TaskOracle configuration are loaded from the
