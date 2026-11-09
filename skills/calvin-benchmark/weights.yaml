@@ -1,0 +1,25 @@
+# Weights this Skill can evaluate. One entry per weight; never overwrite an entry,
+# add a new one (new weight_id, new profile) for every new training run.
+#
+# path      relative to the weight cache dir ~/.PhyAgentOS/weights/calvin-benchmark/
+#           (the cache dir itself can be moved with weights_dir in ~/.PhyAgentOS/benchmarks.yaml)
+# lock      relative to this Skill; per-file size + sha256, checked by start.sh
+# source    where start.sh downloads missing files from; kind: none for private weights
+- weight_id: mcil-d_d-1207
+  profile: vla-mcil-1207
+  family: mcil
+  paradigm: vla
+  benchmark: calvin
+  embodiment: franka-panda
+  path: mcil_d_d
+  lock: locks/mcil_d_d_1207.lock.json
+  source:
+    kind: zip
+    # The CALVIN server only answers plain HTTP. The archive sha256 in the lock is
+    # checked before anything is extracted, and every extracted file is checked again.
+    url: http://calvin.cs.uni-freiburg.de/model_weights/D_D_static_rgb_baseline.zip
+    strip_prefix: D_D_static_rgb_baseline/
+  trained_on: "CALVIN task D->D, static RGB camera, MCIL baseline"
+  date: 2023-12-07
+  released: true
+  notes: "Official CALVIN MCIL baseline (mees/calvin). Uses the L6 MiniLM language embeddings."

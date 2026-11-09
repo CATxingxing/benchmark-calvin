@@ -1,0 +1,22 @@
+benchmark: calvin
+# One runtime serves both official protocols; benchmark.run picks one with `suite`.
+suite: lh_mtlc
+protocol: lh_mtlc
+suites:
+- lh_mtlc
+- mtlc
+serve: true
+policy_id: calvin_policy
+# dataset_path and checkpoint_path come from CALVIN_DATASET / MCIL_CHECKPOINT in dataflow.yaml.
+task_ids:
+- 0
+init_state_ids:
+- 0
+num_runs: 1
+seed: 0
+send_instruction: true
+result_dir: results
+max_total_episodes: 1000
+max_max_steps: 1800
+action_mode: absolute_euler
+sequence_count: 1000
