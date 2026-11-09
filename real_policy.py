@@ -4,15 +4,19 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import numpy as np  # Load the frozen copy before exposing host dependencies.
+import numpy as np
 from dora import Node
 from forge_msgs import Image as ForgeImage
 from forge_msgs import JointCommand, JointState, PolicyCommand
-from host_runtime import configure_host_paths
-
-configure_host_paths("CALVIN_HOST_SITE")
 
 ACTION_NAMES = [f"action_{i}" for i in range(7)]
+
+
+def _env_path(name: str) -> str:
+    """Dataflow env values are passed verbatim, so expand ``~`` here."""
+    return os.path.expanduser(os.environ[name])
+
+
 OBS_CHANNELS = {"proprio_state": "robot_obs", "image/main": "rgb_static", "image/second": "rgb_gripper"}
 
 
@@ -21,8 +25,8 @@ class RealPolicyNode:
         self.policy_id = policy_id or os.environ.get("POLICY_ID", "calvin_policy")
         if runtime is None:
             from mcil_runtime import MCILRuntime
-            runtime = MCILRuntime(os.environ["MCIL_TRAIN_FOLDER"], os.environ["MCIL_CHECKPOINT"],
-                                  os.environ["CALVIN_DATASET"], os.environ.get("POLICY_DEVICE", "cuda:0"))
+            runtime = MCILRuntime(_env_path("MCIL_TRAIN_FOLDER"), _env_path("MCIL_CHECKPOINT"),
+                                  _env_path("CALVIN_DATASET"), os.environ.get("POLICY_DEVICE", "cuda:0"))
         self.runtime = runtime
         self.running = False
         self.instruction: str | None = None
