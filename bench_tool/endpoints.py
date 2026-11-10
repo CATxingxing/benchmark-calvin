@@ -51,6 +51,7 @@ _DESCRIBE_FIELDS = (
     "camera_ids",
     "defaults",
     "limits",
+    "suites",
 )
 
 
@@ -146,6 +147,8 @@ class BenchSessionEndpoint:
             result=result,
             result_file=handle.session.result_path,
             failure_summary=failure_summary,
+            plan=handle.plan,
+            capabilities=self.caps,
         )
 
         error = None
@@ -283,7 +286,29 @@ class BenchSessionEndpoint:
 # 权威兜底（对 adapter 的真实清单），不能删。
 
 
+def _select_suite(arguments: dict[str, Any], capabilities: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    """返回 (suite, 该 suite 的 capabilities 视图)。不传 suite 就用默认 suite。"""
+    default = capabilities.get("suite")
+    requested = arguments.get("suite")
+    if requested is None or requested == default:
+        return default, capabilities
+    suites = {str(item["suite"]): item for item in capabilities.get("suites") or []}
+    if requested not in suites:
+        raise endpoint_error(
+            ERR_INVALID_ARGUMENT,
+            f"未知 suite {requested!r}；可用: {sorted(suites) or [default]}",
+            details={"available_suites": sorted(suites) or [default]},
+        )
+    entry = suites[requested]
+    view = dict(capabilities)
+    view["tasks"] = entry["tasks"]
+    view["num_tasks"] = entry["num_tasks"]
+    view["defaults"] = {**(capabilities.get("defaults") or {}), **(entry.get("defaults") or {})}
+    return str(requested), view
+
+
 def normalize_plan(arguments: dict[str, Any], capabilities: dict[str, Any]) -> dict[str, Any]:
+    suite, capabilities = _select_suite(arguments, capabilities)
     tasks = capabilities.get("tasks") or []
     if not tasks:
         raise endpoint_error(ERR_INVALID_ARGUMENT, "capabilities 里没有任何 task")
@@ -347,6 +372,7 @@ def normalize_plan(arguments: dict[str, Any], capabilities: dict[str, Any]) -> d
         )
 
     return {
+        "suite": suite,
         "task_ids": task_ids,
         "init_state_ids": init_state_ids,
         "num_runs": num_runs,

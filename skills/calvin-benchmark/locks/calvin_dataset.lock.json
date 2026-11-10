@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "resource_id": "calvin-mtlc-evaluation",
+  "notes": "Files of the evaluation dataset that decide the score. L6 MiniLM language embeddings (L3 silently collapses the MCIL score) and the official MTLC episode bounds.",
+  "files": [
+    {
+      "path": "validation/lang_annotations/embeddings.npy",
+      "size_bytes": 64352,
+      "sha256": "70f175572e2ad669eeb00d8a03e12ed796d3c55b2eb2c5c34eee9a8da8b5d25d"
+    },
+    {
+      "path": "validation/lang_annotations/auto_lang_ann.npy",
+      "size_bytes": 1617294,
+      "sha256": "154f49522ae39a57ccc2a7079dcf6d6ee1a5a9f6866e1bb02ba943820974aadf"
+    },
+    {
+      "path": "validation/ep_start_end_ids.npy",
+      "size_bytes": 192,
+      "sha256": "f2ab6e4e569f064d729252612fe8583d3f49df6791953ba47d8e5341e2f85a02"
+    },
+    {
+      "path": "validation/statistics.yaml",
+      "size_bytes": 1289,
+      "sha256": "3507d5172bd2ccd84b5a9ea73f7cb5ecae26c1144fba23dd58cc066338a3e4bf"
+    },
+    {
+      "path": "validation/.hydra/merged_config.yaml",
+      "size_bytes": 7287,
+      "sha256": "75c1c15067e4bd543d1b69a654769836f6cbbf55c4e44ae30da255c45609523f"
+    }
+  ]
+}

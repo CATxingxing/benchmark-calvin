@@ -258,7 +258,7 @@ def test_completed_batch_reports_succeeded_with_seven_fields(endpoint, adapter) 
     assert result.result.error is None
 
     outputs = result.result.outputs
-    # 七字段契约：多一个少一个都和 skill 树的 output_schema 对不上
+    # 七个必填字段 + 五个扩展字段；改这里必须同时改 skill 树的 output_schema
     assert set(outputs) == {
         "run_id",
         "status",
@@ -267,7 +267,17 @@ def test_completed_batch_reports_succeeded_with_seven_fields(endpoint, adapter) 
         "success_rate",
         "result_file",
         "failure_summary",
+        "suite",
+        "primary_metric",
+        "metrics",
+        "is_full_suite",
+        "args",
     }
+    assert outputs["suite"] == "fake_suite"
+    assert outputs["primary_metric"]["name"]
+    # init_state_ids=[0, 1] 没覆盖 task 0 的第 3 个 init state
+    assert outputs["is_full_suite"] is False
+    assert outputs["args"]["init_state_ids"] == [0, 1]
     assert outputs["run_id"] == "inv-1"
     assert outputs["status"] == "succeeded"
     assert outputs["completed_episodes"] == 2

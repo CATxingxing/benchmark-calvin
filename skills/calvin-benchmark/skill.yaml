@@ -1,0 +1,56 @@
+manifest_version: 2
+name: calvin-benchmark
+version: 0.2.0
+description: Run the CALVIN benchmark (LH-MTLC and MTLC) through Forge Query/Session tools.
+skill_document: SKILL.md
+gateway_url: http://127.0.0.1:19131
+required_tools:
+- calvin.benchmark.describe
+- calvin.benchmark.run
+- calvin.policy.describe
+profiles:
+  # <paradigm>-<policy>-<weight date MMDD>; the weight is weights.yaml mcil-d_d-1207.
+  vla-mcil-1207:
+    dataflow: profiles/vla-mcil-1207/dataflow.yaml
+    startup_timeout_s: 900
+    required_binaries:
+    - gateway
+    - calvin_benchmark
+    - calvin_policy
+    required_assets:
+    - profiles/vla-mcil-1207/gateway.yaml
+    - profiles/vla-mcil-1207/benchmark.yaml
+    - weights.yaml
+    - locks/mcil_d_d_1207.lock.json
+    - locks/calvin_dataset.lock.json
+    - scripts/prepare.py
+    environment:
+      PYOPENGL_PLATFORM: egl
+      MUJOCO_GL: egl
+artifacts:
+  resolver: registry
+  nodes:
+    gateway:
+      artifact_id: gateway-1.1.0-linux-x86_64
+      version: 1.1.0
+      platform: linux
+      arch: x86_64
+      artifact_type: executable_tar_gz
+      entrypoint: gateway
+      sha256: bb42c141b299a854fed2ff31f20be5b83551c7c47a30bce06fccd717da202387
+    calvin_benchmark:
+      artifact_id: calvin_benchmark-1.1.0-linux-x86_64
+      version: 1.1.0
+      platform: linux
+      arch: x86_64
+      artifact_type: directory_tar_gz
+      entrypoint: calvin_benchmark
+      sha256: 90e46b9e11632c6d5883ef8e03a63129b86a517ffdf89f6bc22b625a8d5f9359
+    calvin_policy:
+      artifact_id: calvin_policy-1.1.0-linux-x86_64
+      version: 1.1.0
+      platform: linux
+      arch: x86_64
+      artifact_type: directory_tar_gz
+      entrypoint: calvin_policy
+      sha256: 0f74ee25c29fdc46a84ec152ab453ff53cf4f612c8656961e2b52235b4c948ce

@@ -1,0 +1,181 @@
+host: 127.0.0.1
+port: 19131
+joint_order: []
+image_input_ids: []
+readiness:
+  require_proprio_state: false
+  require_images: false
+tools:
+  enabled: true
+  lease_ttl_ms: 300000
+  invoke_timeout_ms: 25200000
+  request_input_id: tool_request
+  response_output_id: tool_response
+  specs:
+  - tool_id: calvin.benchmark.describe
+    implementation_id: calvin-benchmark.benchmark
+    endpoint_id: benchmark.controller
+    operation: describe
+    semantics: query
+    description: 'Read the live benchmark capability whitelist (suite, policy_id,
+      task table, joint/camera identifiers, defaults and limits) directly from the
+      node. Query before planning a run; never invent suites, episode ranges, or limits.
+
+      '
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties: {}
+    output_schema:
+      type: object
+      additionalProperties: true
+      properties:
+        benchmark:
+          type: string
+        suite:
+          type: string
+        policy_id:
+          type: string
+        num_tasks:
+          type: integer
+          minimum: 0
+        tasks:
+          type: array
+        joint_names:
+          type: array
+        camera_ids:
+          type: array
+        defaults:
+          type: object
+        limits:
+          type: object
+    readiness: []
+  - tool_id: calvin.benchmark.run
+    implementation_id: calvin-benchmark.benchmark
+    endpoint_id: benchmark.controller
+    operation: run
+    semantics: session
+    description: Run one batch; start admits a Session, stop takes effect at the episode
+      boundary. Always fetch the terminal result.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        suite:
+          enum:
+          - lh_mtlc
+          - mtlc
+        task_ids:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            minimum: 0
+        init_state_ids:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            minimum: 0
+        num_runs:
+          type: integer
+          minimum: 1
+          maximum: 1
+        max_steps:
+          type: integer
+          minimum: 1
+          maximum: 1800
+        seed:
+          type: integer
+          minimum: 0
+    output_schema:
+      type: object
+      additionalProperties: false
+      required:
+      - run_id
+      - status
+      - completed_episodes
+      - total_episodes
+      - success_rate
+      - result_file
+      - failure_summary
+      properties:
+        run_id:
+          type: string
+        status:
+          enum:
+          - succeeded
+          - failed
+          - partial
+          - stopped
+        completed_episodes:
+          type: integer
+          minimum: 0
+        total_episodes:
+          type: integer
+          minimum: 1
+        success_rate:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+          maximum: 1
+        result_file:
+          type: string
+        failure_summary:
+          type:
+          - string
+          - 'null'
+        suite:
+          enum:
+          - lh_mtlc
+          - mtlc
+        primary_metric:
+          type: object
+        metrics:
+          type: object
+        is_full_suite:
+          type: boolean
+        args:
+          type: object
+    readiness: []
+  - tool_id: calvin.policy.describe
+    implementation_id: calvin-benchmark.policy
+    endpoint_id: policy.runner
+    operation: describe
+    semantics: query
+    description: Confirm the policy model or external G05 connection initialized successfully
+      before running a batch.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: object
+      required:
+      - policy_id
+      - backend
+      - ready
+      - running
+      - action_dim
+      properties:
+        policy_id:
+          type: string
+        backend:
+          type: string
+        ready:
+          type: boolean
+        running:
+          type: boolean
+        action_dim:
+          type: integer
+      additionalProperties: false
+    readiness: []
+  providers:
+  - endpoint_id: benchmark.controller
+    input_id: benchmark_tool_in
+    output_id: benchmark_tool_out
+  - endpoint_id: policy.runner
+    input_id: policy_tool_in
+    output_id: policy_tool_out

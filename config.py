@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field, replace
 from numbers import Integral
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,26 @@ class CalvinConfig(BaseBenchmarkConfig):
     checkpoint_path: str | None = None
     policy_id: str = ""
     control_mode: str = ""
+    # Suites this node instance can evaluate. ``suite``/``protocol`` hold the
+    # default; a run may select any member through ``with_suite``.
+    suites: tuple[str, ...] = field(default_factory=tuple)
+    smoke: bool = False
+
+    def available_suites(self) -> tuple[str, ...]:
+        return self.suites or (self.suite,)
+
+    def with_suite(self, name: str) -> "CalvinConfig":
+        if name not in self.available_suites():
+            raise ValueError(f"suite {name!r} is not configured; available: {list(self.available_suites())}")
+        if name == self.suite:
+            return replace(self)
+        return replace(self, suite=name, protocol=name, max_steps=SUITE_MAX_STEPS[name])
+
+
+SUITE_NAMES = ("lh_mtlc", "mtlc")
+# The shared Runner owns an episode-wide limit; protocol code separately
+# enforces CALVIN's exact per-subtask budget.
+SUITE_MAX_STEPS = {"lh_mtlc": 1800, "mtlc": 240}
 
 
 def _strict_positive_int(value: Any, *, field: str) -> int:
@@ -69,7 +90,7 @@ def _validate_id_spec(value: Any, *, field: str) -> None:
 def load_config(path: str | Path) -> CalvinConfig:
     data = read_yaml(path)
 
-    dataset_path = data.get("dataset_path")
+    dataset_path = data.get("dataset_path") or os.environ.get("CALVIN_DATASET")
     if not isinstance(dataset_path, str) or not dataset_path.strip():
         raise ValueError("dataset_path is required and must be the CALVIN dataset root")
     protocol = data.get("protocol", "lh_mtlc")
@@ -90,11 +111,17 @@ def load_config(path: str | Path) -> CalvinConfig:
 
     cfg = CalvinConfig()
     fill_base(cfg, data)
+    # Forge clients run outside the node's working directory. Return stable,
+    # directly usable artifact paths even when the YAML uses relative paths.
+    for field in ("result_dir", "record_dir"):
+        value = getattr(cfg, field)
+        if value:
+            setattr(cfg, field, str(Path(value).expanduser().resolve()))
     cfg.dataset_path = dataset_path
     cfg.protocol = protocol
     cfg.action_mode = action_mode
     cfg.sequence_count = _strict_positive_int(data.get("sequence_count", cfg.sequence_count), field="sequence_count")
-    cfg.checkpoint_path = data.get("checkpoint_path", cfg.checkpoint_path)
+    cfg.checkpoint_path = data.get("checkpoint_path") or os.environ.get("MCIL_CHECKPOINT", cfg.checkpoint_path)
 
     # Official evaluator inputs are intentionally not configurable here.
     # Language annotations and TaskOracle configuration are loaded from the
@@ -106,28 +133,41 @@ def load_config(path: str | Path) -> CalvinConfig:
             + ", ".join(sorted(forbidden))
         )
 
-    if cfg.protocol not in {"lh_mtlc", "mtlc"}:
+    if cfg.protocol not in SUITE_NAMES:
         raise ValueError("protocol must be 'lh_mtlc' or 'mtlc'")
     if "suite" not in data or not isinstance(data["suite"], str) or not data["suite"].strip():
         raise ValueError("suite is required and must explicitly match protocol")
     if cfg.suite != cfg.protocol:
         raise ValueError(f"suite must match protocol ({cfg.protocol!r}), got {data['suite']!r}")
+    raw_suites = data.get("suites")
+    if raw_suites is None:
+        suites = (cfg.suite,)
+    else:
+        if not isinstance(raw_suites, (list, tuple)) or not raw_suites:
+            raise ValueError("suites must be a non-empty list of suite names")
+        if any(not isinstance(item, str) or item not in SUITE_NAMES for item in raw_suites):
+            raise ValueError(f"suites may only contain {list(SUITE_NAMES)}, got {raw_suites!r}")
+        if len(set(raw_suites)) != len(raw_suites):
+            raise ValueError(f"suites must not repeat entries, got {raw_suites!r}")
+        suites = tuple(raw_suites)
+    if cfg.suite not in suites:
+        raise ValueError(f"default suite {cfg.suite!r} must be listed in suites {list(suites)}")
+    cfg.suites = suites
+    cfg.smoke = data.get("smoke") is True
     if not isinstance(data.get("policy_id"), str) or not data["policy_id"].strip():
         raise ValueError("policy_id is required and must match the target Forge Policy config")
     cfg.policy_id = data["policy_id"].strip()
     cfg.control_mode = cfg.action_mode
-    if cfg.protocol == "mtlc":
+    if "mtlc" in suites:
         if not isinstance(cfg.checkpoint_path, str) or not cfg.checkpoint_path:
             raise ValueError("MTLC requires checkpoint_path containing task_to_id_dict")
 
     # Formal LH-MTLC always uses the official 1000-sequence set. A shorter
     # sequence set is permitted only for an explicitly labelled smoke run.
-    if cfg.protocol == "lh_mtlc" and cfg.sequence_count != 1000 and data.get("smoke") is not True:
+    if "lh_mtlc" in suites and cfg.sequence_count != 1000 and not cfg.smoke:
         raise ValueError("formal LH-MTLC requires sequence_count=1000 (set smoke: true only for a short smoke)")
 
-    # The shared Runner owns an episode-wide limit; protocol code separately
-    # enforces CALVIN's exact per-subtask budget.
-    cfg.max_steps = 1800 if cfg.protocol == "lh_mtlc" else 240
+    cfg.max_steps = SUITE_MAX_STEPS[cfg.protocol]
     return cfg
 
 
