@@ -173,3 +173,9 @@ def test_endpoint_rejects_unknown_suite_synchronously(runtime):
     with pytest.raises(Exception, match="未知 suite"):
         asyncio.run(endpoint.start(ToolRequest(arguments={"suite": "abc"}), context, events=None))
     assert endpoint.take_pending() == []
+
+
+def test_action_dim_follows_action_mode(runtime):
+    cfg, adapter, caps = runtime
+    assert adapter.action_dim == adapter.codec.dimension
+    assert caps["action_dim"] == adapter.codec.dimension

@@ -617,6 +617,12 @@ class CalvinAdapter:
     def state_joint_names(self) -> list[str]:
         return list(self._state_names)
 
+    @property
+    def action_dim(self) -> int:
+        """环境动作空间维度，随 action_mode 变：absolute_quaternion = 8，其余 = 7。
+        核心按它在 step 前校验，维度不符整批 failed。"""
+        return self.codec.dimension
+
     def reproducibility(self) -> dict[str, Any]:
         contract = self._observation_contract()
         value = {
