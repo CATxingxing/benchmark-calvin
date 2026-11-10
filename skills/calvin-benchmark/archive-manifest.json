@@ -32,8 +32,8 @@
     },
     {
       "path": "README.md",
-      "size": 2497,
-      "sha256": "5ee39aefc877c34c2013bd152858be12b3decf3ea1ee2a538b2d53d760022bac"
+      "size": 2780,
+      "sha256": "8e140bc37096f8616593ee6cfaa73968b3996da332138e33da62c2f3e6a15436"
     },
     {
       "path": "scripts/prepare.py",
@@ -48,7 +48,7 @@
     {
       "path": "skill.yaml",
       "size": 1744,
-      "sha256": "6fb1c242de420fb8f84c01894a0c41da57fc09fe9775ad9f5ff9ea1548608932"
+      "sha256": "5bd2c2678d2fb26b4f62a3886eac988630672aa87bdd08e073e372ac911ecf30"
     },
     {
       "path": "start.sh",

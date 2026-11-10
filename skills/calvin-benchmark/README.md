@@ -1,4 +1,4 @@
-# calvin-benchmark 0.2.0 candidate
+# calvin-benchmark 0.2.1 candidate
 
 Not accepted for publication until the real-model and PAOS lifecycle tests pass.
 
@@ -7,7 +7,7 @@ Gateway: http://127.0.0.1:19131. Tools: `calvin.benchmark.describe`, `calvin.ben
 
 | Profile | Paradigm | Policy | Weight | Suites | Nodes |
 | --- | --- | --- | --- | --- | --- |
-| `vla-mcil-1207` | VLA | MCIL baseline (official CALVIN) | `mcil-d_d-1207` | `lh_mtlc`, `mtlc` | gateway 1.1.0, calvin_benchmark 1.1.0, calvin_policy 1.1.0 |
+| `vla-mcil-1207` | VLA | MCIL baseline (official CALVIN) | `mcil-d_d-1207` | `lh_mtlc`, `mtlc` | gateway 1.1.0, calvin_benchmark 1.1.1, calvin_policy 1.1.0 |
 
 Profile names are `<paradigm>-<policy>-<weight date MMDD>`. `weights.yaml` lists each profile's
 weight; `locks/` pins the exact weight files and the dataset files that decide the score (size and
@@ -41,3 +41,5 @@ the hook, so a cold download on a clean machine does not count against it. Later
 `~/.PhyAgentOS/cache/nodes/<node>/<lock digest>` and skip it.
 
 See HOST_RUNTIME.md for the CALVIN sources and how to build the evaluation dataset.
+
+0.2.1: calvin_benchmark 1.1.1 checks every policy action against the environment action space (7D, or 8D for absolute_quaternion) before `env.step`. A mismatch fails the whole run with `action_dim_mismatch` instead of scoring each episode as 0. `describe` now reports `action_dim`.

@@ -27,7 +27,8 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-VERSION = "1.1.0"
+# Per-Node versions: bump only the Node whose bundled code changed.
+VERSIONS = {"calvin_benchmark": "1.1.1", "calvin_policy": "1.1.0"}
 COMMON_IMPORTS = "numpy torch dora forge_msgs forge_tool pyarrow yaml"
 NODES = {
     "calvin_benchmark": {
@@ -111,10 +112,10 @@ def main() -> int:
     for node in nodes:
         with tempfile.TemporaryDirectory(prefix="calvin-nodes-") as tmp:
             top = stage_node(node, args.uv.resolve(), Path(tmp))
-            artifact_id = f"{node}-{VERSION}-linux-x86_64"
+            artifact_id = f"{node}-{VERSIONS[node]}-linux-x86_64"
             archive = args.out / f"{artifact_id}.tar.gz"
             digest = pack(top, archive)
-        manifest[node] = {"artifact_id": artifact_id, "version": VERSION, "artifact_type": "directory_tar_gz",
+        manifest[node] = {"artifact_id": artifact_id, "version": VERSIONS[node], "artifact_type": "directory_tar_gz",
                           "entrypoint": node, "sha256": digest, "file": archive.name,
                           "size": archive.stat().st_size}
         print(f"{archive}  {digest}  {archive.stat().st_size / 1e6:.1f} MB")

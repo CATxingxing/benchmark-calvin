@@ -1,6 +1,6 @@
 manifest_version: 2
 name: calvin-benchmark
-version: 0.2.0
+version: 0.2.1
 description: Run the CALVIN benchmark (LH-MTLC and MTLC) through Forge Query/Session tools.
 skill_document: SKILL.md
 gateway_url: http://127.0.0.1:19131
@@ -39,13 +39,13 @@ artifacts:
       entrypoint: gateway
       sha256: bb42c141b299a854fed2ff31f20be5b83551c7c47a30bce06fccd717da202387
     calvin_benchmark:
-      artifact_id: calvin_benchmark-1.1.0-linux-x86_64
-      version: 1.1.0
+      artifact_id: calvin_benchmark-1.1.1-linux-x86_64
+      version: 1.1.1
       platform: linux
       arch: x86_64
       artifact_type: directory_tar_gz
       entrypoint: calvin_benchmark
-      sha256: 90e46b9e11632c6d5883ef8e03a63129b86a517ffdf89f6bc22b625a8d5f9359
+      sha256: 7ae5d08ccc81cea4f922859ccbb9cda009deade49f578750835c73a27e79c724
     calvin_policy:
       artifact_id: calvin_policy-1.1.0-linux-x86_64
       version: 1.1.0
