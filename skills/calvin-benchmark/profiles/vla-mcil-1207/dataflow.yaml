@@ -1,0 +1,82 @@
+# Fixed paths are linked by the start hook from ~/.PhyAgentOS/benchmarks.yaml (calvin section).
+# GPU: CUDA_VISIBLE_DEVICES selects one GPU (default 0); EGL rendering uses the same index
+# (dora does not expand nested defaults). Every ${VAR} has a default, so none is required.
+nodes:
+- id: gateway
+  path: ${FORGE_RUNTIME_BIN}/gateway
+  args: --config gateway.yaml
+  inputs:
+    tick: dora/timer/millis/50
+    benchmark_tool_in:
+      source: calvin_benchmark/tool_out
+      queue_size: 32
+    policy_tool_in:
+      source: calvin_policy/tool_out
+      queue_size: 32
+  outputs:
+  - tool_response
+  - benchmark_tool_out
+  - policy_tool_out
+- id: calvin_benchmark
+  path: ${FORGE_RUNTIME_BIN}/calvin_benchmark
+  env:
+    CALVIN_ROOT: ${HOME}/.PhyAgentOS/data/calvin
+    CALVIN_DATASET: ${HOME}/.PhyAgentOS/data/calvin-dataset
+    MCIL_TRAIN_FOLDER: ${HOME}/.PhyAgentOS/weights/calvin-benchmark/mcil_d_d
+    MCIL_CHECKPOINT: ${HOME}/.PhyAgentOS/weights/calvin-benchmark/mcil_d_d/mcil_baseline.ckpt
+    CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+    EGL_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+    PYOPENGL_PLATFORM: egl
+    MUJOCO_GL: egl
+    BENCHMARK_CONFIG: benchmark.yaml
+  inputs:
+    tick: dora/timer/millis/1000
+    tool_in:
+      source: gateway/benchmark_tool_out
+      queue_size: 32
+    action:
+      source: calvin_policy/action
+      queue_size: 32
+  outputs:
+  - tool_out
+  - proprio_state
+  - image/main
+  - image/second
+  - policy_command
+  - benchmark_status
+  - benchmark_result
+- id: calvin_policy
+  path: ${FORGE_RUNTIME_BIN}/calvin_policy
+  env:
+    CALVIN_ROOT: ${HOME}/.PhyAgentOS/data/calvin
+    CALVIN_DATASET: ${HOME}/.PhyAgentOS/data/calvin-dataset
+    MCIL_TRAIN_FOLDER: ${HOME}/.PhyAgentOS/weights/calvin-benchmark/mcil_d_d
+    MCIL_CHECKPOINT: ${HOME}/.PhyAgentOS/weights/calvin-benchmark/mcil_d_d/mcil_baseline.ckpt
+    CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+    EGL_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+    PYOPENGL_PLATFORM: egl
+    MUJOCO_GL: egl
+    POLICY_ID: calvin_policy
+    POLICY_TOOL_ENABLED: '1'
+    POLICY_DEVICE: cuda:0
+    POLICY_SEED: '0'
+  inputs:
+    tick: dora/timer/millis/1000
+    tool_in:
+      source: gateway/policy_tool_out
+      queue_size: 32
+    policy_command:
+      source: calvin_benchmark/policy_command
+      queue_size: 32
+    proprio_state:
+      source: calvin_benchmark/proprio_state
+      queue_size: 32
+    image/main:
+      source: calvin_benchmark/image/main
+      queue_size: 32
+    image/second:
+      source: calvin_benchmark/image/second
+      queue_size: 32
+  outputs:
+  - tool_out
+  - action

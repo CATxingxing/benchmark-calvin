@@ -258,7 +258,7 @@ def test_completed_batch_reports_succeeded_with_seven_fields(endpoint, adapter) 
     assert result.result.error is None
 
     outputs = result.result.outputs
-    # 七字段契约：多一个少一个都和 skill 树的 output_schema 对不上
+    # 七个必填字段 + 五个扩展字段；改这里必须同时改 skill 树的 output_schema
     assert set(outputs) == {
         "run_id",
         "status",
@@ -267,7 +267,17 @@ def test_completed_batch_reports_succeeded_with_seven_fields(endpoint, adapter) 
         "success_rate",
         "result_file",
         "failure_summary",
+        "suite",
+        "primary_metric",
+        "metrics",
+        "is_full_suite",
+        "args",
     }
+    assert outputs["suite"] == "fake_suite"
+    assert outputs["primary_metric"]["name"]
+    # init_state_ids=[0, 1] 没覆盖 task 0 的第 3 个 init state
+    assert outputs["is_full_suite"] is False
+    assert outputs["args"]["init_state_ids"] == [0, 1]
     assert outputs["run_id"] == "inv-1"
     assert outputs["status"] == "succeeded"
     assert outputs["completed_episodes"] == 2
@@ -362,3 +372,29 @@ def test_describe_returns_whitelisted_capabilities(caps) -> None:
     assert outputs["defaults"] == {"num_runs": 1, "seed": 0, "max_steps": 300}
     assert "result_dir" not in outputs
     assert "reproducibility" not in outputs  # 内部字段不得泄漏
+
+
+# ---- 动作维度契约 ----
+
+
+def test_action_dim_mismatch_reports_failed_with_error_code(endpoint, adapter) -> None:
+    _start(endpoint, "inv-1", init_state_ids=[0, 1])
+    handle = endpoint.take_pending()[0]
+    handle.session.start()
+    bad = JointCommand.from_np(np.zeros(7), [f"a{i}" for i in range(7)], "position")
+    handle.session.on_action(bad)
+    assert handle.session.finished
+    endpoint.on_finished(handle)
+
+    result = asyncio.run(endpoint.result(_key("inv-1")))
+    assert result.result.status == "failed"
+    assert result.result.error.code == "BENCH_RUN_FAILED"
+    assert result.result.error.details["error_code"] == "action_dim_mismatch"
+    assert result.result.outputs["status"] == "failed"
+    assert "维度 7" in result.result.outputs["failure_summary"]
+
+
+def test_describe_exposes_action_dim(caps) -> None:
+    endpoint = BenchDescribeEndpoint(caps)
+    result = asyncio.run(endpoint.query(ToolRequest(arguments={}), _context("inv-x")))
+    assert result.outputs["action_dim"] == len(JOINTS)

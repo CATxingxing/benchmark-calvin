@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """CALVIN benchmark node (Dora).
 
-The generic Forge benchmark core is vendored unchanged from benchmark-libero;
-CALVIN-specific semantics live in adapters/calvin_adapter.py and config.py.
+The generic Forge benchmark core is vendored from benchmark-libero with the
+multi-suite extension listed in README.md; CALVIN-specific semantics live in
+adapters/calvin_adapter.py and config.py.
 """
 
 from __future__ import annotations
